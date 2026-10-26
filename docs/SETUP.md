@@ -24,6 +24,17 @@ The Power Platform command-line tools below are needed for the verbs that use th
 
 Behind a corporate proxy, set `HTTPS_PROXY` and `HTTP_PROXY` before installing; uv and npm both honour them.
 
+## Optional Microsoft plugins
+
+These author content that this plugin deliberately does not rebuild. Install them only if you use them; each adds MCP tools to every session (only their names load until one is needed).
+
+| Plugin | Adds | Install |
+|---|---|---|
+| `powerbi-authoring` | 23 tools for semantic models and reports (local Power BI Modeling MCP) | `/plugin marketplace add microsoft/skills-for-fabric`, then `/plugin install powerbi-authoring@fabric-collection` |
+| `power-automate` | 65 tools for cloud flows (FlowAgent) plus Microsoft Learn search | `/plugin marketplace add microsoft/power-platform-skills`, then `/plugin install power-automate@power-platform-skills` |
+| `canvas-apps` | Canvas app authoring through a live Power Apps Studio session (needs the .NET 10 SDK) | `/plugin install canvas-apps@power-platform-skills` |
+
+
 ## Install
 
 In Claude Code:
