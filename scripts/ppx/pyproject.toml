@@ -1,0 +1,25 @@
+[project]
+name = "ppx"
+version = "0.2.0"
+description = "JSON-emitting command-line harness for Power BI, Power Apps and SharePoint work."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+ppx = "ppx.cli:main"
+ppx-mcp = "ppx.mcp_server:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+# Runtime `uv run` must never need a package index, so dev tools install only on request.
+default-groups = []
+
+[tool.uv.build-backend]
+module-root = ""
+
+[build-system]
+# A wide range lets uv build with its built-in backend instead of downloading one.
+requires = ["uv_build>=0.8.0,<1"]
+build-backend = "uv_build"
