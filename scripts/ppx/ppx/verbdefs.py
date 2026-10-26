@@ -11,19 +11,17 @@ Effects:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+# namedtuple, not dataclass: dataclasses imports inspect, which costs the hook about 45 ms on every call.
+from collections import namedtuple
 
 EFFECTS = ("read", "local", "change", "irreversible", "interactive", "by-method")
 
 
-@dataclass(frozen=True)
-class Arg:
-    flags: tuple[str, ...]
-    help: str
-    kind: str = "str"  # str | int | flag | choice | multi
-    choices: tuple[str, ...] = ()
-    required: bool | None = None  # None: positionals are required, options are not
-    default: object = None
+class Arg(namedtuple("Arg", "flags help kind choices required default", defaults=("str", (), None, None))):
+    """flags; help; kind: str | int | flag | choice | multi; choices; required: None means positionals are
+    required and options are not; default."""
+
+    __slots__ = ()
 
     @property
     def dest(self) -> str:
@@ -39,16 +37,12 @@ class Arg:
         return self.positional if self.required is None else self.required
 
 
-@dataclass(frozen=True)
-class Verb:
-    path: tuple[str, ...]
-    summary: str
-    effect: str
-    handler: str
-    notice: str = ""
-    args: tuple[Arg, ...] = ()
-    escalate: tuple[tuple[str, str], ...] = ()  # (flag or flag=value, effect) that raise the effect
-    needs_data: bool = True
+class Verb(namedtuple("Verb", "path summary effect handler notice args escalate needs_data",
+                      defaults=("", (), (), True))):
+    """path; summary; effect; handler "module:function"; notice template; args; escalate: (flag or
+    flag=value, effect) pairs that raise the effect; needs_data."""
+
+    __slots__ = ()
 
     @property
     def name(self) -> str:

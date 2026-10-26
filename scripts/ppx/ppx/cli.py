@@ -18,7 +18,7 @@ from pathlib import Path
 from ppx import audit, datadir, envs
 from ppx.changes import ChangeSet
 from ppx.envelope import Envelope, NextAction, Result, dumps, fit_budget
-from ppx.errors import PpxError, SetupNeeded, UsageError
+from ppx.errors import NeedsConfirmation, PpxError, SetupNeeded, UsageError
 from ppx.redact import scrub, scrub_text
 from ppx.verbtable import GLOBAL_ARGS, VERBS, Arg, Verb
 
@@ -81,7 +81,7 @@ def _add_arg(parser: argparse.ArgumentParser, arg: Arg) -> None:
         kw["action"] = "store_true"
     elif arg.kind == "int":
         kw["type"] = int
-    elif arg.kind in ("choice", "multi"):
+    elif arg.kind in ("choice", "multi") and arg.choices:  # a multi without choices takes any value
         kw["choices"] = arg.choices
     if arg.kind == "multi":
         kw["nargs"] = "+"
@@ -89,7 +89,7 @@ def _add_arg(parser: argparse.ArgumentParser, arg: Arg) -> None:
         kw["default"] = arg.default
     if arg.positional:
         if not arg.is_required:
-            kw["nargs"] = "?"
+            kw["nargs"] = "*" if arg.kind == "multi" else "?"
         parser.add_argument(arg.flags[0], **kw)
     else:
         if arg.is_required:
@@ -159,17 +159,18 @@ def _project(data: dict, fields: list[str] | None, top: int | None) -> dict:
 
 
 def _help(argv: list[str]) -> Result:
-    from ppx.cmd_verbs import GLOBAL_FLAGS, describe
+    from ppx.cmd_verbs import listing
     from ppx.verbtable import find
 
     words = [w for w in argv if not w.startswith("-")]
     verb, _ = find(words)
     if verb is not None:
-        rows = [r for r in describe(verb.path[0]) if r["verb"] == verb.name]
+        words = list(verb.path)
+    elif not (words and any(v.path[0] == words[0] for v in VERBS)):
+        words = []
     else:
-        rows = describe(words[0]) if words and any(v.path[0] == words[0] for v in VERBS) else describe()
-    env = Envelope(True, "help", {"count": len(rows), "items": rows, "global_flags": GLOBAL_FLAGS})
-    return Result(fit_budget(env.to_dict()), 0)
+        words = words[:1]
+    return Result(fit_budget(Envelope(True, "help", listing(words)).to_dict()), 0)
 
 
 @contextlib.contextmanager
@@ -234,11 +235,16 @@ def dispatch(argv: list[str], *, interactive: bool = True, environ: dict | None 
         exc = caught if isinstance(caught, PpxError) else _unexpected(caught)
         warnings = ctx.warnings if ctx else []
         nxt = (ctx.next_actions if ctx else []) + exc.next_actions
-        data = {"error": exc.message, **exc.data}
-        if ctx and ctx.changes.items:
-            data.setdefault("changes", ctx.changes.to_list())
-        env = Envelope(False, operation, data, warnings, nxt, ctx.target_env if ctx else None)
-        result = Result(env.to_dict(), exc.exit_code)
+        if isinstance(exc, NeedsConfirmation) and ctx and ctx.dry_run:
+            # A dry run answers what the real run would change; that the real run needs --yes is part of it.
+            data = {"changes": ctx.changes.to_list(), "dry_run": True, "needs_yes": exc.message}
+            result = Result(Envelope(True, operation, data, warnings, nxt, ctx.target_env).to_dict(), 0)
+        else:
+            data = {"error": exc.message, **exc.data}
+            if ctx and ctx.changes.items:
+                data.setdefault("changes", ctx.changes.to_list())
+            env = Envelope(False, operation, data, warnings, nxt, ctx.target_env if ctx else None)
+            result = Result(env.to_dict(), exc.exit_code)
     _audit(ctx, argv, result)
     out = scrub(result.envelope)
     if not (ctx and ctx.raw):

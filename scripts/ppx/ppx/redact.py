@@ -12,6 +12,8 @@ _PATTERNS = [
     # A purely numeric code= is an AADSTS error-lookup URL, not an OAuth code, so it is kept.
     re.compile(r"(?i)([?&](?:sig|token|code)=)(?!\d{1,10}(?:[&\s\"']|$))[^&\s\"']+"),
     re.compile(r"(?i)((?:--clientSecret|-cs|--certificatePassword|-cp|--password|-p)[ =])\S+"),
+    # The password in URL userinfo (https://user:password@host), e.g. a connector host typed with credentials.
+    re.compile(r"(?i)(://[^/@\s:]+:)[^@/\s]+(?=@)"),
 ]
 
 

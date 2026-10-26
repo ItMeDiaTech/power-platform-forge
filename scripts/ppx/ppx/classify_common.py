@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections import namedtuple
 
 from ppx.redact import MASK, scrub_text
 
@@ -11,11 +11,7 @@ KINDS = ("read", "local", "change", "interactive", "unknown", "irreversible")
 _RANK = {kind: i for i, kind in enumerate(KINDS)}
 
 
-@dataclass(frozen=True)
-class Classification:
-    kind: str
-    summary: str
-    binary: str
+Classification = namedtuple("Classification", "kind summary binary")  # not a dataclass: see verbdefs
 
 
 READ = Classification("read", "", "")

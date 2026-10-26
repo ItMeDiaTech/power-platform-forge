@@ -17,7 +17,7 @@ STALE_HOURS = 24
 
 
 def _safe(part: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", part).strip("-")[:80] or "_"
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", part).strip(".-")[:80] or "_"
 
 
 def folder(data_dir: Path, area: str, key: str) -> Path:

@@ -12,16 +12,19 @@ from ppx.verbtable import GLOBAL_ARGS, find
 # ---- ppx -----------------------------------------------------------------------------------------
 
 _GLOBAL_VALUE = {f for a in GLOBAL_ARGS if a.kind != "flag" for f in a.flags}
-_GLOBAL_FLAG = {f for a in GLOBAL_ARGS if a.kind == "flag" for f in a.flags}
+_GLOBAL_FLAG = {f: a.dest for a in GLOBAL_ARGS if a.kind == "flag" for f in a.flags}
 
 
 class _Default(dict):
+    # Verbs fill these from the active (or --profile) profile when they are not on the line.
+    _PROFILE = {"workspace", "site", "url", "environment"}
+
     def __missing__(self, key):
-        return "(not given)"
+        return "(the profile's default)" if key in self._PROFILE else "(not given)"
 
 
 def _ppx(tokens: list[str]) -> Classification:
-    rest, i = [], 0
+    rest, given, i = [], {}, 0
     while i < len(tokens):
         tok = tokens[i]
         name = tok.split("=", 1)[0]
@@ -30,7 +33,9 @@ def _ppx(tokens: list[str]) -> Classification:
         if name in _GLOBAL_VALUE:
             i += 1 if "=" in tok else 2
             continue
-        if tok not in _GLOBAL_FLAG:
+        if tok in _GLOBAL_FLAG:  # kept, so an escalate entry on --yes can match
+            given[_GLOBAL_FLAG[tok]] = True
+        else:
             rest.append(tok)
         i += 1
     if not rest:
@@ -40,7 +45,7 @@ def _ppx(tokens: list[str]) -> Classification:
         return Classification("unknown", _clip(f"ppx {' '.join(rest)} (a verb this version of ppx does not know)"), "ppx")
     by_flag = {f: a for a in verb.args if not a.positional for f in a.flags}
     positionals = iter([a for a in verb.args if a.positional])
-    values, args, j = {}, rest[n:], 0
+    values, args, j = dict(given), rest[n:], 0
     while j < len(args):
         key, eq, val = args[j].partition("=")
         arg = by_flag.get(key)

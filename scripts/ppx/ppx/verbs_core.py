@@ -21,7 +21,7 @@ VERBS: tuple[Verb, ...] = (
                a("--tenant", help="tenant id or domain (m365, az)"),
                a("--app-id", help="client id of your own app registration (m365)"))),
     Verb(("auth", "logout"), "Sign out of one backend on this computer", "local", "ppx.cmd_auth:logout",
-         notice="Sign out of {backend} on this computer",
+         notice="Sign out of {backend} on this computer (for pac: removes every pac sign-in profile)",
          args=(a("--backend", kind="choice", choices=BACKENDS, required=True, help="which tool to sign out"),)),
     Verb(("auth", "app-spec"), "Print the exact app registration for SharePoint and Graph access (Tier B)", "read",
          "ppx.cmd_auth:app_spec", needs_data=False),
@@ -55,7 +55,7 @@ VERBS: tuple[Verb, ...] = (
     Verb(("probe",), "Discover what this user can reach on the tenant; writes routing.json and a scrubbed report",
          "local", "ppx.probe:run",
          notice="Probe what this user can reach and rewrite routing.json on this computer"
-                " (write probes use scratch workspace {workspace} and take over model {model})",
+                " (with --write: scratch workspace {workspace}, and model {model} is taken over)",
          args=(a("--area", help=f"comma-separated areas to probe: {','.join(AREAS)} or all (default: all)"),
                a("--write", kind="flag", help="also run write probes against the scratch items given"),
                a("--workspace", help="scratch workspace (name or id) for write probes"),
@@ -65,6 +65,7 @@ VERBS: tuple[Verb, ...] = (
                a("--app", help="scratch canvas app name")),
          # --model is only used by write probes, which take the model over: the hook asks, not just tells.
          escalate=(("--write", "change"), ("--model", "irreversible"))),
-    Verb(("verbs",), "List ppx verbs, their arguments and what each changes", "read", "ppx.cmd_verbs:run",
-         args=(a("group", help="only this group, e.g. pbi", required=False),), needs_data=False),
+    Verb(("verbs",), "List ppx verbs by group, a group's verbs, or one verb's arguments", "read", "ppx.cmd_verbs:run",
+         args=(a("group", kind="multi", help="a group (pbi) for its verbs, or a verb (pbi push) for its arguments",
+                 required=False),), needs_data=False),
 )

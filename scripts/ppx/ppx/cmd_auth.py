@@ -49,7 +49,7 @@ _CHECKS = (
     ("powershell 5.1", ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _MAKER_PS],
      auth.INSTALL["powershell.exe"]),
 )
-_MAKER_INSTALL = ('powershell.exe -NoProfile -Command "Install-Module Microsoft.PowerApps.PowerShell '
+MAKER_INSTALL = ('powershell.exe -NoProfile -Command "Install-Module Microsoft.PowerApps.PowerShell '
                   '-Scope CurrentUser"')
 _VERSION = re.compile(r"\d+(?:\.\d+)+[\w.+-]*")
 # The login line is pasted into the user's own shell, so these values may not carry shell syntax.
@@ -112,7 +112,7 @@ def _check(name: str, argv: list[str], install: str, timeout: float) -> list[dic
                    if desktop_version not in ("", "-") else
                    {"name": "Power BI Desktop", "found": False, "install": _DESKTOP_INSTALL})
         return [{"name": name, "found": True, "version": lines[0].strip() if lines else "unknown"},
-                module if maker else {**module, "install": _MAKER_INSTALL}, desktop]
+                module if maker else {**module, "install": MAKER_INSTALL}, desktop]
     if name == "az":
         try:
             text = json.loads(text).get("azure-cli") or text
@@ -120,7 +120,11 @@ def _check(name: str, argv: list[str], install: str, timeout: float) -> list[dic
             pass
     found = re.search(r"Version:\s*(\S+)", text) if name == "pac" else _VERSION.search(text)
     version = (found.group(1) if name == "pac" else found.group(0)) if found else "unknown"
-    return [{"name": name, "found": True, "version": version[:40]}]
+    row = {"name": name, "found": True, "version": version[:40]}
+    if name == "m365" and not version.startswith("11."):
+        row["install"] = auth.INSTALL["m365"]  # the doctor's way of saying: not the version ppx is written for
+        row["note"] = "ppx is written for version 11; version 12 changes the recycle-bin flags of item deletes"
+    return [row]
 
 
 def _parallel(jobs: dict, timeout: float) -> dict:

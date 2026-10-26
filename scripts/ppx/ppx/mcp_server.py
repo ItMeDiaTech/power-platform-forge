@@ -30,10 +30,12 @@ TOOLS = [
     {"name": "doctor", "description": "Check ppx sign-ins, token reach per API and prerequisites. Read-only.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
      "annotations": {"readOnlyHint": True}},
-    {"name": "verbs", "description": "List ppx verbs, their arguments and what each changes "
-                                     "(read, local, change, irreversible, interactive). Read-only.",
+    {"name": "verbs", "description": "List ppx verb groups; with group, that group's verbs and what each changes "
+                                     "(read, local, change, irreversible, interactive); with a verb, its arguments. "
+                                     "Read-only.",
      "inputSchema": {"type": "object", "additionalProperties": False,
-                     "properties": {"group": {"type": "string", "description": "only this group, e.g. pbi"}}},
+                     "properties": {"group": {"type": "string",
+                                              "description": "a group (\"pbi\") or a verb (\"pbi push\")"}}},
      "annotations": {"readOnlyHint": True}},
     {"name": "run", "description": "Run one ppx verb and return its JSON envelope. Pass the verb path and its "
                                    "arguments as separate strings; call verbs to see them.",

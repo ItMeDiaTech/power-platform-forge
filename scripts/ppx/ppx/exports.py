@@ -14,7 +14,9 @@ def save(data_dir: Path, name: str, content: str | bytes, suffix: str = ".json")
     folder = Path(data_dir) / "exports"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")[:60] or "export"
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-")[:60] or "export"
+    # The suffix can come from an API response (an export's file extension): letters and digits only.
+    suffix = "." + (re.sub(r"[^A-Za-z0-9]", "", suffix)[:10] or "bin")
     path = folder / f"{stamp}-{safe}{suffix}"
     if isinstance(content, bytes):
         path.write_bytes(content)

@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
+import urllib.parse
 from pathlib import Path
 
 from ppx import apis, exports, http
+from ppx.envelope import NextAction
 from ppx.errors import UsageError
+
+_REFRESH = re.compile(r"/datasets/[^/]+/refreshes/?$", re.I)
 
 
 def _body(text: str | None):
@@ -29,6 +34,11 @@ def run(ctx, args) -> dict:
     url = api.url(args.path)
     body = _body(args.body)
     method = args.method.upper()
+    if api.name == "pbi" and method == "POST" and _REFRESH.search(urllib.parse.urlsplit(url).path):
+        # Every refresh goes through one gate that counts today's (8 a day on shared capacity); raw would skip it.
+        raise UsageError("start refreshes with ppx pbi refresh, which counts today's refreshes and waits for a running one",
+                         next_actions=[NextAction("refresh the model", command="ppx pbi refresh --model <model> "
+                                                                               "--workspace <workspace>")])
     if method != "GET":
         ctx.changes.add(f"{method} {args.path}", api.name, reversible=method != "DELETE")
         ctx.changes.require_yes(ctx.yes)

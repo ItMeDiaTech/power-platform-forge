@@ -32,7 +32,8 @@ SOURCES = ("az", "tier_b", "pac")
 BACKEND = {"az": "az", "tier_b": "m365", "pac": "pac"}
 INSTALL = {
     "az": "winget install -e --id Microsoft.AzureCLI",
-    "m365": "npm install -g @pnp/cli-microsoft365",
+    # Pinned: v12 swaps `spo listitem remove --recycle` for `--permanent`, which ppx's deletes rely on.
+    "m365": "npm install -g @pnp/cli-microsoft365@11",
     "pac": pac.INSTALL,
     "fab": "uv tool install ms-fabric-cli",
     "powershell.exe": "Windows PowerShell 5.1 ships with Windows 10 and 11",

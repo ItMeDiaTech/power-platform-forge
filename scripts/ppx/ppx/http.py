@@ -110,7 +110,8 @@ def _error_parts(resp: Response) -> tuple[str | None, str | None]:
         err = body.get("error")
         if isinstance(err, dict):
             inner = err.get("innererror") or err.get("pbi.error") or {}
-            msg = err.get("message") or (inner.get("message") if isinstance(inner, dict) else None)
+            msg = (err.get("message") or (inner.get("message") if isinstance(inner, dict) else None)
+                   or detail_text(err))
             return err.get("code"), (msg or "")[:500] or None
         if "errorCode" in body:
             return body.get("errorCode"), (body.get("message") or "")[:500] or None
@@ -119,17 +120,41 @@ def _error_parts(resp: Response) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _retry_after(resp: Response, attempt: int) -> float:
+def detail_text(err: dict) -> str | None:
+    """The text Power BI puts in error["pbi.error"]["details"] (or error["details"]) instead of a message.
+
+    Learn (Execute Queries In Group): the message "may also be found in details object nested under
+    the error object"; entries look like {"code": "DetailsMessage", "detail": {"type": 1, "value": "..."}}.
+    """
+    for holder in (err.get("pbi.error"), err):
+        details = holder.get("details") if isinstance(holder, dict) else None
+        if isinstance(details, str) and details:
+            return details
+        found = [d for d in details if isinstance(d, dict) and isinstance(d.get("detail"), dict)
+                 and isinstance(d["detail"].get("value"), str)] if isinstance(details, list) else []
+        found = [d for d in found if d.get("code") in ("DetailsMessage", "Message")] or found  # the message, if named
+        if found:
+            return " ".join(d["detail"]["value"] for d in found)
+    return None
+
+
+def _requested_wait(resp: Response) -> float | None:
+    """The Retry-After header in seconds (a number or an HTTP date), or None."""
     value = resp.headers.get("retry-after")
-    if value:
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
         try:
-            return min(float(value), MAX_WAIT_SECONDS)
-        except ValueError:
-            try:
-                return min(max(parsedate_to_datetime(value).timestamp() - time.time(), 1), MAX_WAIT_SECONDS)
-            except (TypeError, ValueError):
-                pass
-    return min(2 ** attempt, MAX_WAIT_SECONDS)
+            return max(parsedate_to_datetime(value).timestamp() - time.time(), 1)
+        except (TypeError, ValueError):
+            return None
+
+
+def _retry_after(resp: Response, attempt: int) -> float:
+    wanted = _requested_wait(resp)
+    return min(wanted if wanted is not None else 2 ** attempt, MAX_WAIT_SECONDS)
 
 
 def _readonly_denial(resp: Response) -> bool:
@@ -165,6 +190,11 @@ def request(method: str, url: str, *, audience: str, op: str = "read", json_body
         hdrs.update(headers or {})
         resp = transport.send(method, url, hdrs, payload, timeout)
         if resp.status in (429, 503) and attempt < MAX_RETRIES:
+            wanted = _requested_wait(resp)
+            if wanted is not None and wanted > MAX_WAIT_SECONDS:  # e.g. Dataverse's 5-minute limits: retrying early fails
+                raise PpxError(f"{method} {_short(url)} was throttled ({resp.status}); the service asks to wait "
+                               f"{wanted:.0f} s before the next call", data={"status": resp.status,
+                                                                              "retry_after": round(wanted)})
             sleep(_retry_after(resp, attempt))
             attempt += 1
             continue

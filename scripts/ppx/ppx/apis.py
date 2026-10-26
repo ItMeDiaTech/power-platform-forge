@@ -59,11 +59,22 @@ def powerplatform() -> Api:
     return Api("powerplatform", POWERPLATFORM_RESOURCE, POWERPLATFORM_BASE, ("api.powerplatform.com",))
 
 
+def _https(url: str) -> str:
+    """The URL without a trailing slash; refused unless https, since the tenant-wide token goes with it."""
+    try:
+        scheme = urllib.parse.urlsplit(url).scheme
+    except ValueError:
+        scheme = ""
+    if scheme.lower() != "https":
+        raise UsageError(f"{url!r} must be an https:// URL; ppx never sends a token over plain http")
+    return url.rstrip("/")
+
+
 def dataverse(env_url: str | None) -> Api:
     if not env_url:
         raise SetupNeeded("no Dataverse environment URL: set one on the profile",
                           next_actions=[NextAction("set it", command="ppx env set --url https://<org>.crm.dynamics.com")])
-    env_url = env_url.rstrip("/")
+    env_url = _https(env_url)
     return Api("dataverse", env_url + "/", env_url + "/api/data/v9.2", (_host(env_url),))
 
 
@@ -71,7 +82,7 @@ def sharepoint(site_url: str | None) -> Api:
     if not site_url:
         raise SetupNeeded("no SharePoint site: pass --site or set one on the profile",
                           next_actions=[NextAction("set it", command="ppx env set --site https://<tenant>.sharepoint.com/sites/<site>")])
-    site_url = site_url.rstrip("/")
+    site_url = _https(site_url)
     host = _host(site_url)
     if not host.endswith(".sharepoint.com"):
         raise UsageError(f"{site_url!r} is not a SharePoint Online site URL")
