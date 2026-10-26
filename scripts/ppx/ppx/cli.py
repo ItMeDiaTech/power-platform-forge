@@ -250,7 +250,8 @@ def _unexpected(exc: Exception) -> PpxError:
     """A bug or an unexpected reply (say, a proxy's HTML page) still ends in one envelope and an audit line."""
     print(scrub_text(traceback.format_exc()), file=sys.stderr)
     return PpxError(f"unexpected {type(exc).__name__}: {scrub_text(' '.join(str(exc).split()))[:300]}",
-                    next_actions=[NextAction("check the network or proxy, then retry; the details are on stderr")])
+                    next_actions=[NextAction("an unexpected reply (such as a proxy's sign-in page) or a ppx bug; "
+                                             "the full error is on stderr, so read it before retrying")])
 
 
 def _audit(ctx: Ctx | None, argv: list[str], result: Result) -> None:

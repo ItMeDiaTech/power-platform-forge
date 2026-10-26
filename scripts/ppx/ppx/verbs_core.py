@@ -63,7 +63,8 @@ VERBS: tuple[Verb, ...] = (
                a("--report", help="scratch report in that workspace"),
                a("--site", help="scratch SharePoint site URL"), a("--list", help="scratch SharePoint list title"),
                a("--app", help="scratch canvas app name")),
-         escalate=(("--write", "change"),)),
+         # --model is only used by write probes, which take the model over: the hook asks, not just tells.
+         escalate=(("--write", "change"), ("--model", "irreversible"))),
     Verb(("verbs",), "List ppx verbs, their arguments and what each changes", "read", "ppx.cmd_verbs:run",
          args=(a("group", help="only this group, e.g. pbi", required=False),), needs_data=False),
 )

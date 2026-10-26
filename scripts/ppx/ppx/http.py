@@ -73,11 +73,12 @@ def _short(url: str) -> str:
 
 
 def _same_host(link: str, base: str) -> str:
-    """`link` made absolute against `base`, refused when it leaves base's host: the token goes with it."""
+    """`link` made absolute against `base`, refused when it leaves base's scheme, host or port: the token goes with it."""
     absolute = urllib.parse.urljoin(base, link)
-    host = urllib.parse.urlsplit(absolute).hostname
-    if host != urllib.parse.urlsplit(base).hostname:
-        raise PpxError(f"{_short(base)} pointed to another host ({host}); ppx does not send your token there")
+    to, origin = urllib.parse.urlsplit(absolute), urllib.parse.urlsplit(base)
+    if (to.scheme, to.hostname, to.port) != (origin.scheme, origin.hostname, origin.port):
+        raise PpxError(f"{_short(base)} pointed to another host ({to.scheme}://{to.netloc}); "
+                       "ppx does not send your token there")
     return absolute
 
 
