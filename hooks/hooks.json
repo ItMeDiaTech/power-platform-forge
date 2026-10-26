@@ -1,5 +1,5 @@
 {
-  "description": "Plain-English notices for Power Platform changes made through Bash, PowerShell and Power Platform MCP tools, and a pointer to the ppx data directory",
+  "description": "Plain-English notices for Power Platform changes made through Bash, PowerShell and Power Platform MCP tools, a pointer to the ppx data directory, and an advisory schema check of edited Power BI report (PBIR) files",
   "hooks": {
     "SessionStart": [
       {
@@ -36,6 +36,20 @@
             "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/change_notice.py"],
             "timeout": 10,
             "onFailure": "block"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Edit(//**/*.Report/definition/**/*.json)",
+            "command": "uv",
+            "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pbir_validate.py"],
+            "timeout": 10
           }
         ]
       }
