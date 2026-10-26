@@ -17,5 +17,20 @@
     "fabric",
     "cli",
     "mcp"
-  ]
+  ],
+  "mcpServers": {
+    "ppx": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/ppx",
+        "--offline",
+        "ppx-mcp"
+      ],
+      "env": {
+        "PPX_DATA_DIR": "${CLAUDE_PLUGIN_DATA}"
+      }
+    }
+  }
 }
