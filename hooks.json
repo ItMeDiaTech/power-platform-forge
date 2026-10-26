@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "power-platform-forge registers no GitHub Copilot CLI hooks; its change notices run in Claude Code only (see docs/SAFETY.md)",
+  "hooks": {}
+}

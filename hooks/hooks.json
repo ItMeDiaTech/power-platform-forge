@@ -1,0 +1,44 @@
+{
+  "description": "Plain-English notices for Power Platform changes made through Bash, PowerShell and Power Platform MCP tools, and a pointer to the ppx data directory",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session_start.py"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/change_notice.py"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "^mcp__(?:(?!__).)*(?<![A-Za-z0-9])(?:power-platform-forge_ppx|powerbi|flowagent|dataverse|fabric|m365|microsoft365|pnp)(?![A-Za-z0-9])(?:(?!__).)*__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/change_notice.py"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ]
+  }
+}
