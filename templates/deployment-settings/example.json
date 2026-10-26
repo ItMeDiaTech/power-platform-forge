@@ -1,0 +1,24 @@
+{
+  "EnvironmentVariables": [
+    {
+      "SchemaName": "contoso_SharePointSiteUrl",
+      "Value": "https://contoso.sharepoint.com/sites/Sales"
+    },
+    {
+      "SchemaName": "contoso_ApprovalsListName",
+      "Value": "Approvals"
+    }
+  ],
+  "ConnectionReferences": [
+    {
+      "LogicalName": "contoso_sharedsharepointonline_a1b2c",
+      "ConnectionId": "",
+      "ConnectorId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline"
+    },
+    {
+      "LogicalName": "contoso_sharedcommondataserviceforapps_d3e4f",
+      "ConnectionId": "",
+      "ConnectorId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+    }
+  ]
+}
