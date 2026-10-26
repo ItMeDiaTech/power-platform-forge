@@ -19,46 +19,63 @@ GUID	[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}
 # Public Microsoft first-party ids (resource apps, the Azure CLI client) may be added to the
 # GUID allow pattern above; never add an id that belongs to a tenant, user or item.
 
-if [ "${1:-}" = "--all" ]; then
-  # Scan every tracked file's working-tree content (used by the local gate), not just the index.
-  list() { git ls-files -z; }
-  show() { cat -- "$1"; }
+all=; [ "${1:-}" = "--all" ] && all=1
+if [ -n "$all" ]; then
+  list() { git ls-files -z; }  # every tracked file's working-tree content (the local gate), not just the index
 else
   list() { git diff --cached --name-only --diff-filter=ACMR -z; }
-  show() { git show ":$1"; }
 fi
 
 # List first, so a git failure (say, a "dubious ownership" refusal) fails the scan instead of
 # scanning nothing and passing.
 listing=$(mktemp) || exit 1
-trap 'rm -f "$listing"' EXIT
+base=.
+trap 'rm -f "$listing"; [ "$base" = . ] || rm -rf "$base"' EXIT
 if ! list > "$listing"; then
   echo "check-secrets: git could not list the files to scan; nothing was checked" >&2
   exit 1
 fi
-if [ "${1:-}" = "--all" ] && [ ! -s "$listing" ]; then
+if [ -n "$all" ] && [ ! -s "$listing" ]; then
   echo "check-secrets: no tracked files found; nothing was checked" >&2
   exit 1
 fi
 
-status=0
+# A commit is scanned as staged, so its blobs are copied into a scratch tree; --all reads the files in place.
+[ -n "$all" ] || base=$(mktemp -d) || exit 1
+files=()
 while IFS= read -r -d '' file; do
   # The scanner's own pattern lists would match themselves.
   [ "$file" = "scripts/check-secrets.sh" ] && continue
-  [ -f "$file" ] || continue
-  content=$(show "$file")
-  if printf '%s' "$content" | grep -Eaq "$secret"; then
-    echo "check-secrets: credential-shaped content in $file; remove it before committing" >&2
+  if [ -n "$all" ]; then
+    [ -f "$file" ] || continue
+  else
+    case $file in */*) mkdir -p "$base/${file%/*}" ;; esac
+    git show ":$file" > "$base/$file" || exit 1
+  fi
+  files+=("$file")
+done < "$listing"
+[ ${#files[@]} -eq 0 ] && exit 0
+cd "$base" || exit 1
+
+# One grep per pattern over all files: a process per file and pattern took minutes on Windows.
+each() { printf '%s\0' "${files[@]}" | xargs -0 grep "$@"; }
+
+status=0
+while IFS= read -r file; do
+  echo "check-secrets: credential-shaped content in $file; remove it before committing" >&2
+  status=1
+done < <(each -Ela -- "$secret")
+while IFS=$'\t' read -r kind pattern allow; do
+  # Line numbers only: the identifier itself is not echoed into terminals or logs.
+  found=$(each -HnaEo -- "$pattern" | grep -viE "^[^:]*:[0-9]+:(${allow})\$" | awk -F: -v kind="$kind" '
+    function flush() { if (f != "") printf "check-secrets: %s in %s on line(s) %s; replace it with a placeholder such as contoso\n", kind, f, lines }
+    $1 != f { flush(); f = $1; lines = ""; last = "" }
+    $2 != last { lines = lines (lines == "" ? "" : " ") $2; last = $2 }
+    END { flush() }')
+  if [ -n "$found" ]; then
+    echo "$found" >&2
     status=1
   fi
-  while IFS=$'\t' read -r kind pattern allow; do
-    # Line numbers only: the identifier itself is not echoed into terminals or logs.
-    lines=$(printf '%s' "$content" | grep -naEo "$pattern" | grep -viE "^[0-9]+:(${allow})\$" | cut -d: -f1 | sort -un | tr '\n' ' ')
-    if [ -n "$lines" ]; then
-      echo "check-secrets: $kind in $file on line(s) ${lines% }; replace it with a placeholder such as contoso" >&2
-      status=1
-    fi
-  done <<< "$checks"
-done < "$listing"
+done <<< "$checks"
 
 exit $status
