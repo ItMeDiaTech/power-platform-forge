@@ -5,11 +5,13 @@ Run on the work laptop. Verbatim results (response bodies, tenant identifiers) s
 sources that worked so ppx.auth tries them first; <data>/probe/<date>/report.md is the scrubbed
 copy that may leave the laptop. Each check has its own timeout and one failing check never stops
 the others. The probe never refreshes a model.
+
+Split by job: probe_writes (write probes), probe_scrub (report scrubbing) and probe_records (shared
+constants and check-record helpers).
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -20,18 +22,20 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 
-from ppx import __version__, apis, auth, cmd_auth, http, pac, proc, resolve
-from ppx.errors import PpxError, SetupNeeded, UsageError
+from ppx import __version__, apis, auth, cmd_auth, http, pac, proc
+from ppx.errors import PpxError, UsageError
+from ppx.probe_records import (KINDS, ORDER, SLOW, _cell, _cli_failure, _dax_summary,
+                               _definition_summary, _detail, _digest, _failure, _fields, _from_error, _json,
+                               _key_paths, _md, _ok, _pick, _run, _settle, _tool, _yaml_hits)
+from ppx.probe_scrub import Scrubber
+from ppx.probe_writes import _WriteProbes, _plan_writes
 from ppx.redact import scrub
 from ppx.verbs_core import AREAS
 
 # AREAS lists tokens before toolchain, so the pbi/az mint is the first az start of the run (the cold timing).
-ORDER = ("az", "tier_b")  # read and write fallback order; pac mints Power Platform API tokens only
-SLOW = 3  # definitions, canvas downloads and PowerShell cold starts get this many --timeout spans
-CELL_MAX = 32  # matrix cells stay short so the envelope fits in 4 KB
+
 DEVICE_FIELDS = ("AzureAdJoined", "WorkplaceJoined", "DeviceAuthStatus", "AzureAdPrt")
 DAX = 'EVALUATE ROW("n", 1)'
-KINDS = {"report": ("reports", "PBIR"), "model": ("semanticModels", "TMDL")}
 _PS = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
 # 'Stop' turns a failed sign-in into a non-zero exit instead of an error record followed by success.
 _PS_APP = "$ErrorActionPreference = 'Stop'; Get-PowerApp | Select-Object -First 1 | ConvertTo-Json -Depth 4"
@@ -43,12 +47,6 @@ _PS_CMDLETS = ("$o = @{commands = @(Get-Command -Module Microsoft.PowerApps.Powe
 _KV = re.compile(r"^\s*([A-Za-z][\w ]*?)\s*:\s?(.*?)\s*$", re.M)
 _COLUMN = r"[A-Za-z][\w()./-]*(?: [\w()./-]+)*"
 _HEADER = re.compile(rf"^\s*{_COLUMN}(?: {{2,}}{_COLUMN})+\s*$")
-_YAML_KEY = re.compile(r"""^[\s-]*('[^']*'|"[^"]*"|[A-Za-z_][\w .()-]*?)\s*:(?:\s|$)""")
-_BLOCK = re.compile(r"\s*[|>][-+0-9]*\s*(?:#.*)?$")  # a `key: |-` value: the deeper lines are text, not keys
-_AADSTS = re.compile(r"AADSTS(\d+)")
-_BANNER = re.compile(r"^[ \t]*Connected to\.*[ \t]*(\S.*?)[ \t\r]*$", re.M)  # pac names the environment it is signed in to
-_SIGN_IN = re.compile(r"log ?in|sign ?in|auth create|no profiles", re.I)
-_GUID = auth._GUID
 
 
 def run(ctx, args) -> dict:
@@ -106,25 +104,6 @@ def run(ctx, args) -> dict:
             "report": str(report_path), "raw": str(raw_path), "routing": str(data_dir / auth.ROUTING_FILE)}
 
 
-def _plan_writes(ctx, args, backups: dict[str, str]) -> None:
-    where = f"workspace {args.workspace}"
-    if args.model:
-        ctx.changes.add("create a scratch report bound to the model, then delete it", f"{where}, model {args.model}",
-                        undo="the probe deletes the report it creates")
-    if args.report:
-        ctx.changes.add("write the report's own definition back unchanged (updateDefinition)",
-                        f"{where}, report {args.report}",
-                        backup=f"<data>/{backups['report']} holds the definition pulled just before")
-    if args.model:
-        ctx.changes.add("write the model's own definition back unchanged (updateDefinition, allowPurgeData false)",
-                        f"{where}, model {args.model}",
-                        backup=f"<data>/{backups['model']} holds the definition pulled just before")
-        # Not reversible from here: only the previous owner can take it back, and its refresh
-        # credentials stay with them, so a wrongly named shared model can stop refreshing.
-        ctx.changes.add("take over the model (you become its owner)", f"{where}, model {args.model}",
-                        reversible=False, undo="the previous owner can take it over again")
-
-
 class _Tokens:
     """Tokens minted once per resource and source for this run, through auth's single-source attempt.
 
@@ -151,7 +130,7 @@ class _Tokens:
         return provide
 
 
-class _Probe:
+class _Probe(_WriteProbes):
     def __init__(self, ctx, args, backups: dict[str, Path], site: str | None):
         self.ctx, self.args, self.backups, self.site = ctx, args, backups, site
         self.timeout = float(ctx.timeout)
@@ -442,134 +421,6 @@ class _Probe:
         body = _json(p.stdout)
         return _ok(_fields(body), body)
 
-    # -- write probes ---------------------------------------------------------------------------
-
-    def writes(self) -> None:
-        targets = self.check("write", "targets", self._targets)
-        if not targets:
-            for name in ("create-report", "updateDefinition-report", "updateDefinition-model", "takeover"):
-                self.skip("write", name, "scratch targets not resolved")
-            return
-        ws, model, report = targets["workspace"], targets.get("model"), targets.get("report")
-        scratch = f"ppx-probe-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
-        jobs = []
-        if model:
-            # POST, its operation (SLOW spans) and the DELETE all fit in the check's budget.
-            jobs.append(("create-report", partial(self._create_report, ws, model, scratch), SLOW + 2))
-        jobs += [(f"updateDefinition-{kind}", partial(self._update_definition, kind, ws, item), 2 * SLOW)
-                 for kind, item in (("report", report), ("model", model)) if item]
-        if model:
-            jobs.append(("takeover", partial(self._takeover, ws, model), 1))
-        for name, fn, spans in jobs:
-            got = self.check("write", name, fn, spans)
-            if got:
-                key, attempts = got
-                self.evidence.setdefault(key, []).extend((a["source"], a["status"]) for a in attempts)
-        left = self.results["write"].get("create-report", {})
-        if left.get("code") in ("not-deleted", "maybe-created"):
-            self.ctx.warn(left["message"])
-        elif left.get("status") == "timeout":
-            self.ctx.warn(f"creating scratch report {scratch} ran out of time and it may still appear in workspace "
-                          f"{ws}; delete it there")
-
-    def _targets(self) -> dict:
-        a = self.args
-        ws = self.ids.get("workspace") or self._lookup("workspace", a.workspace, "groups")
-        out = {"workspace": ws["id"]}
-        for kind, wanted, path in (("model", a.model, "datasets"), ("report", a.report, "reports")):
-            if wanted:
-                out[kind] = (self.ids.get(kind) or self._lookup(kind, wanted, f"groups/{ws['id']}/{path}"))["id"]
-        return _ok({"resolved": sorted(out)}, out, value=out)
-
-    def _lookup(self, kind: str, wanted: str, path: str) -> dict:
-        if _GUID.fullmatch(wanted.strip()):
-            return {"id": wanted.strip()}
-        api = apis.pbi()
-        attempts = self.via(api.resource, ORDER, lambda prov: http.paged(
-            api.url(path), audience=api.resource, timeout=self.timeout, token_provider=prov)[0])
-        return resolve.pick(kind, wanted, next((a["value"] for a in attempts if a["status"] == "ok"), []))
-
-    def _write(self, key: str, fn, summarise=lambda value: {}) -> dict:
-        attempts = self.via(apis.by_name(key).resource, ORDER, fn, write=True)
-        out = _settle(attempts, summarise)
-        out["value"] = (key, attempts)
-        return out
-
-    def _create_report(self, ws: str, model: str, name: str) -> dict:
-        api = apis.fabric()
-        body = {"displayName": name,
-                "creationPayload": {"semanticModelReference": {"referenceType": "ById", "itemId": model,
-                                                               "workspaceId": ws}}}
-
-        def create(prov):
-            resp = http.request("POST", api.url(f"workspaces/{ws}/reports"), audience=api.resource, op="write",
-                                json_body=body, timeout=self.timeout, token_provider=prov)
-            try:
-                created = http.wait_operation(resp, audience=api.resource, timeout=self.timeout * SLOW,
-                                              token_provider=prov, fetch_result=True) or {}
-                if not created.get("id"):
-                    raise PpxError("create report answered without the new report's id")
-            except PpxError as exc:
-                # Accepted but not confirmed: Fabric may still create it, and no other source may try again.
-                raise PpxError(f"scratch report {name} may exist in workspace {ws} ({exc.message}); delete it there",
-                               data={"code": "maybe-created"}) from exc
-            try:  # inside, so a failed delete never makes the next source create a second report
-                http.request("DELETE", api.url(f"workspaces/{ws}/reports/{created['id']}"), audience=api.resource,
-                             op="write", timeout=self.timeout, token_provider=prov)
-            except PpxError as exc:
-                return {"created": created, "lro": resp.status == 202, "deleted": False, "error": exc.message}
-            return {"created": created, "lro": resp.status == 202, "deleted": True}
-
-        out = self._write("fabric", create, lambda v: {"lro": v["lro"], "deleted": v["deleted"]})
-        done = next((a["value"] for a in out["value"][1] if a["status"] == "ok"), None)
-        if done and not done["deleted"]:
-            out.update(status="error", code="not-deleted",
-                       message=f"the probe created scratch report {name} ({done['created']['id']}) but could not "
-                               f"delete it ({done['error']}); delete it in workspace {ws}")
-        return out
-
-    def _update_definition(self, kind: str, ws: str, item: str) -> dict:
-        api = apis.fabric()
-        path = f"workspaces/{ws}/{KINDS[kind][0]}/{item}"
-        # A report goes back in the format it is stored in (PBIR or PBIR-Legacy): writing the PBIR pull of a
-        # PBIR-Legacy report would convert it. A model's TMDL is only a serialisation, so that pull is reused.
-        fmt = KINDS[kind][1] if kind == "model" else None
-        definition = self.definitions.get(kind)
-        if not definition:
-            pulled = self.via(api.resource, ORDER, partial(self._pull, path, fmt))
-            definition = next((a["value"]["definition"] for a in pulled if a["status"] == "ok"), None)
-        if not (definition or {}).get("parts"):
-            return {"status": "error", "code": "no-definition", "message": f"could not pull the {kind} definition "
-                                                                           "to write back", "raw": {}}
-        body = {"definition": definition}
-        if kind == "model":
-            body["options"] = {"allowPurgeData": False}
-        backup = self.backups[kind]
-        try:
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            backup.write_text(json.dumps({"definition": definition}, indent=1), encoding="utf-8")
-        except OSError as exc:
-            return {"status": "error", "code": "no-backup", "message": f"not written back: could not save the {kind} "
-                                                                       f"definition first ({exc.strerror or exc})",
-                    "raw": {}}
-
-        def update(prov):
-            resp = http.request("POST", api.url(f"{path}/updateDefinition"), audience=api.resource, op="write",
-                                params={"updateMetadata": "false"}, json_body=body, timeout=self.timeout,
-                                token_provider=prov)
-            http.wait_operation(resp, audience=api.resource, timeout=self.timeout * SLOW, token_provider=prov)
-            return {"lro": resp.status == 202}
-        return self._write("fabric", update, lambda v: v)
-
-    def _takeover(self, ws: str, model: str) -> dict:
-        api = apis.pbi()
-
-        def take(prov):
-            http.request("POST", api.url(f"groups/{ws}/datasets/{model}/Default.TakeOver"), audience=api.resource,
-                         op="write", body=b"", timeout=self.timeout, token_provider=prov)
-            return {}
-        return self._write("pbi", take)
-
     # -- results --------------------------------------------------------------------------------
 
     def routing(self) -> dict:
@@ -604,268 +455,6 @@ class _Probe:
             lines.append("")
         lines += ["## routing.json from this run", "", "```json", json.dumps(routing, indent=2), "```", ""]
         return "\n".join(lines)
-
-
-class Scrubber:
-    """Stable placeholders for tenant identifiers: <org>, <site-1>, <env-1>, <guid-1>, <user-1>, <name-1>."""
-
-    _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-    _HOST = re.compile(r"\b(?:[\w-]+\.)+(?:sharepoint\.com|dynamics\.com|onmicrosoft\.com)\b", re.I)
-    _MARK = re.compile(r"(<(?:org|site-\d+|env-\d+|guid-\d+|user-\d+|name-\d+)>)")
-    _NAME_KEYS = ("title", "configuredby", "createdby", "modifiedby", "owner")
-    MIN_NAME = 3  # shorter values identify nothing and would mangle field names such as "id"
-
-    def __init__(self):
-        self.seen: dict[tuple[str, str], str] = {}
-        self.names: set[str] = set()
-        self.orgs: set[str] = set()
-
-    def learn(self, obj, key: str = "") -> None:
-        """Collect display names and tenant labels from raw results, to mask them wherever they reappear."""
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                self.learn(v, str(k))
-        elif isinstance(obj, list):
-            for v in obj:
-                self.learn(v, key)
-        elif isinstance(obj, str):
-            low = key.lower()
-            if low == "tenantname":
-                self.orgs.add(obj.strip())
-            elif low.endswith("name") or low in self._NAME_KEYS:
-                self.names.add(obj.strip())
-            self.names.update(_BANNER.findall(obj))
-            for host in self._HOST.findall(obj):
-                self.orgs.add(re.sub(r"-(my|admin)$", "", host.split(".")[0], flags=re.I))
-
-    def learn_args(self, args, site: str | None) -> None:
-        self.names.update(v.strip() for v in (args.workspace, args.model, args.report, args.app, args.list) if v)
-        if site:
-            self.learn(site)
-            segments = urllib.parse.unquote(urllib.parse.urlsplit(site).path).split("/")
-            self.names.update(s for s in segments if s and s.lower() not in ("sites", "teams"))
-
-    def _tag(self, kind: str, value: str) -> str:
-        key = (kind, value.lower())
-        if key not in self.seen:
-            self.seen[key] = "<org>" if kind == "org" else \
-                f"<{kind}-{sum(k == kind for k, _ in self.seen) + 1}>"
-        return self.seen[key]
-
-    def _host(self, host: str) -> str:
-        low = host.lower()
-        if low.endswith(".onmicrosoft.com"):
-            return "<org>"
-        return self._tag("site" if low.endswith(".sharepoint.com") else "env", low)
-
-    def text(self, s: str) -> str:
-        s = self._EMAIL.sub(lambda m: self._tag("user", m.group()), s)
-        s = self._HOST.sub(lambda m: self._host(m.group()), s)
-        s = _GUID.sub(lambda m: self._tag("guid", m.group()), s)
-        orgs = {o.lower() for o in self.orgs}
-        words = sorted({w for w in self.names | self.orgs if len(w) >= self.MIN_NAME}, key=len, reverse=True)
-        if not words:
-            return s
-        pattern = re.compile("|".join(rf"(?<!\w){re.escape(w)}(?!\w)" for w in words), re.I)
-        tag = lambda m: self._tag("org" if m.group().lower() in orgs else "name", m.group())  # noqa: E731
-        # Placeholders already written are left alone, so a name such as "site" cannot eat "<site-1>".
-        return "".join(part if i % 2 else pattern.sub(tag, part) for i, part in enumerate(self._MARK.split(s)))
-
-
-# -- helpers ------------------------------------------------------------------------------------
-
-
-def _ok(summary: dict, raw=None, value=None) -> dict:
-    return {"status": "ok", "summary": summary, "raw": raw, "value": value}
-
-
-def _run(fn, timeout: float) -> dict:
-    start = time.monotonic()
-    done = cmd_auth._parallel({"check": fn}, timeout).get("check")
-    if done is None:
-        out = {"status": "timeout", "code": "timeout", "message": f"no answer within {timeout:g} s"}
-    elif isinstance(done, BaseException):
-        out = _from_error(done)
-    else:
-        out = done
-    out["elapsed_ms"] = round((time.monotonic() - start) * 1000)
-    return out
-
-
-def _from_error(exc: BaseException) -> dict:
-    if isinstance(exc, http.HttpError):
-        refused = exc.status in (401, 403) or "read-only" in exc.message.lower()
-        return {"status": "blocked" if refused else "error", "code": f"{exc.status} {exc.code or ''}".strip(),
-                "message": exc.message}
-    if isinstance(exc, proc.ProcTimeout):
-        return {"status": "timeout", "code": "timeout", "message": exc.message}
-    if isinstance(exc, SetupNeeded):
-        return {"status": "missing", "code": "missing", "message": exc.message}
-    if isinstance(exc, PpxError):
-        return {"status": "error", "code": exc.data.get("code") or ("error" if type(exc) is PpxError
-                                                                    else type(exc).__name__),
-                "message": exc.message}
-    return {"status": "error", "code": type(exc).__name__, "message": auth.clean(str(exc))}
-
-
-def _failure(f) -> dict:
-    """An auth._Failure (one source could not mint a token) as an outcome."""
-    return {"status": {"missing": "missing", "timeout": "timeout", "error": "error"}.get(f.code, "blocked"),
-            "code": f"AADSTS{f.code}" if f.code.isdigit() else f.code, "message": f.detail, "token": True}
-
-
-def _cli_failure(p: proc.Proc) -> dict:
-    # pac's "Connected as/to..." banner names the user and environment and says nothing about the failure.
-    text = "\n".join(line for line in f"{p.stderr}\n{p.stdout}".splitlines()
-                     if not line.lstrip().startswith("Connected "))
-    found = _AADSTS.search(text)
-    code = f"AADSTS{found.group(1)}" if found else ("not-signed-in" if _SIGN_IN.search(text) else f"exit {p.code}")
-    return {"status": "error" if code.startswith("exit") else "blocked", "code": code, "message": auth.clean(text),
-            "raw": {"exit": p.code, "stdout": p.stdout, "stderr": p.stderr}}
-
-
-def _settle(attempts: list[dict], summarise) -> dict:
-    """One check's outcome from its per-source attempts: ok when any source worked."""
-    via = "; ".join(f"{a['source']} {_cell(a)}" for a in attempts)
-    ok = [a for a in attempts if a["status"] == "ok"]
-    if ok:
-        return {"status": "ok", "summary": {**summarise(ok[0]["value"]), "via": via},
-                "raw": {"attempts": attempts}, "value": ok[0]["value"]}
-    worst = next((a for a in attempts if not a.get("token")), attempts[0])  # an API refusal says more
-    return {"status": worst["status"], "code": worst.get("code"), "message": worst.get("message"),
-            "summary": {"via": via}, "raw": {"attempts": attempts}}
-
-
-def _cell(rec: dict) -> str:
-    status, code = rec["status"], rec.get("code")
-    return (status if status in ("ok", "skipped") or not code or code == status else f"{status}:{code}")[:CELL_MAX]
-
-
-def _pick(kind: str, wanted: str | None, items: list | None) -> dict | None:
-    """The item `wanted` names (an id or a name), the first item when nothing was asked for, else None."""
-    if not wanted:
-        return items[0] if items else None
-    if _GUID.fullmatch(wanted.strip()):
-        return {"id": wanted.strip()}
-    try:
-        return resolve.pick(kind, wanted, items or [])
-    except PpxError:
-        return None
-
-
-def _fields(body) -> dict:
-    if isinstance(body, dict) and isinstance(body.get("value"), list):
-        body = body["value"]
-    if isinstance(body, list):
-        first = body[0] if body and isinstance(body[0], dict) else {}
-        out = {"count": len(body), "fields": sorted(first)}
-        types = sorted({str(i["type"]) for i in body if isinstance(i, dict) and "type" in i})
-        return {**out, "types": types} if types else out
-    return {"fields": sorted(body)} if isinstance(body, dict) else {"type": type(body).__name__}
-
-
-def _tool(row: dict) -> str:
-    if "reachable" in row:
-        return f"{row['name']} {'reachable' if row['reachable'] else 'unreachable'}"
-    return f"{row['name']} {row.get('version', '')}".strip() if row.get("found") else f"{row['name']} missing"
-
-
-def _dax_summary(body) -> dict:
-    result = ((body or {}).get("results") or [{}])[0]
-    table = (result.get("tables") or [{}])[0]
-    error = (body or {}).get("error") or result.get("error") or table.get("error")
-    return {"rows": len(table.get("rows") or []), "error": error.get("code") if isinstance(error, dict) else None}
-
-
-def _definition_summary(pulled: dict) -> dict:
-    definition = pulled["definition"]
-    paths = [str(p.get("path", "")) for p in definition.get("parts") or []]
-    return {"format": definition.get("format") or _format_of(paths), "parts": len(paths), "lro": pulled["lro"],
-            "roots": sorted({p.split("/")[0] + ("/" if "/" in p else "") for p in paths})}
-
-
-def _format_of(paths: list[str]) -> str:
-    if any(p.endswith(".tmdl") for p in paths):
-        return "TMDL"
-    if "model.bim" in paths:
-        return "TMSL"
-    if "report.json" in paths:
-        return "PBIR-Legacy"
-    return "PBIR" if any(p.startswith("definition/") for p in paths) else "unknown"
-
-
-def _digest(definition: dict) -> str:
-    h = hashlib.sha256()
-    for part in sorted(definition.get("parts") or [], key=lambda p: str(p.get("path"))):
-        h.update(f"{part.get('path')}\0{part.get('payload')}\0".encode())
-    return h.hexdigest()
-
-
-def _json(text: str):
-    """The first JSON value in a CLI's output, skipping banner lines before it."""
-    decoder = json.JSONDecoder()
-    for m in re.finditer(r"[\[{]", text):
-        try:
-            return decoder.raw_decode(text, m.start())[0]
-        except ValueError:
-            continue
-    raise PpxError("printed no JSON", data={"code": "no-json"})
-
-
-def _key_paths(obj, depth: int, prefix: str = "") -> list[str]:
-    if depth == 0 or not isinstance(obj, dict):
-        return []
-    out = []
-    for k, v in obj.items():
-        out += [prefix + k] + _key_paths(v, depth - 1, f"{prefix}{k}.")
-    return out
-
-
-def _yaml_hits(text: str, needles: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """(key path, what) for each line of a .pa.yaml file that holds one of the needles."""
-    # shortcut: key paths come from indentation, not a YAML parser (stdlib has none); enough to say where
-    # a value sits, upgrade if real apps put hits under the wrong key.
-    stack: list[tuple[int, str]] = []
-    hits = set()
-    block = None  # indent of the key whose block scalar (a multi-line formula) is being read
-    for line in text.splitlines():
-        if block is not None and (not line.strip() or len(line) - len(line.lstrip(" ")) > block):
-            m = None
-        else:
-            block, m = None, _YAML_KEY.match(line)
-        if m:
-            indent = len(line) - len(line.lstrip(" -"))
-            while stack and stack[-1][0] >= indent:
-                stack.pop()
-            stack.append((indent, m.group(1).strip("'\"")))
-            if _BLOCK.match(line[m.end():]):
-                block = indent
-        low = line.lower()
-        hits.update(("/".join(k for _, k in stack), what) for needle, what in needles if needle in low)
-    return sorted(hits)
-
-
-def _shape(message: str) -> str:
-    return re.sub(r"'[^']*'|\"[^\"]*\"", "'<q>'", auth.clean(str(message)))[:200]
-
-
-def _detail(rec: dict) -> str:
-    bits = []
-    for k, v in (rec.get("summary") or {}).items():
-        if v in (None, "", [], {}):
-            continue
-        if isinstance(v, (list, tuple)):
-            v = ", ".join(json.dumps(x, separators=(",", ":")) if isinstance(x, dict) else str(x) for x in v)
-        elif isinstance(v, dict):
-            v = json.dumps(v, separators=(",", ":"))
-        bits.append(f"{k}: {v}")
-    if rec.get("message") and rec["status"] != "ok":
-        bits.append(f"message: {_shape(rec['message'])}")
-    return "; ".join(bits)
-
-
-def _md(value) -> str:
-    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
 def _save_routing(data_dir: Path, found: dict) -> None:
