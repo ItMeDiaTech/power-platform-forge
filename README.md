@@ -14,6 +14,8 @@ It is built for an ordinary user on a work tenant. Nothing requires an admin rol
 - **Skills** that route the agent to the right verb, or to Microsoft's own agent plugins for authoring (Power BI models and reports, canvas apps, flows): `pp-auth-doctor`, `pbi-ops`, `pbi-authoring`, `sharepoint-ops`, `powerapps-ops`, `pp-solution-alm`, `pp-solution-architect`, `pp-testing`.
 - **Agents** `pp-architect` (plans a build: SharePoint list or Dataverse, which app type, how Power BI reads the data, which flows and solution) and `pp-reviewer` (runs the matching checks on a change before it ships and ranks the problems).
 - **An advisory schema check** of Power BI report (PBIR) files after the agent edits them, against Microsoft's published JSON schemas.
+- **Your design preferences**: a short Markdown file of rules (colours, fonts, layout, naming, list columns) that the agent reads before it builds a report, app or list. `ppx prefs --init` creates your copy; the MCP server serves it as `ppx://design-preferences`.
+- **A Power Apps maker session**: `ppx auth login --backend maker` opens one PowerShell window that holds your maker sign-in while it stays open, so sharing, versions and restore run in it instead of asking you to sign in each time.
 
 ## What the agent can do
 
@@ -21,7 +23,7 @@ It is built for an ordinary user on a work tenant. Nothing requires an admin rol
 
 | Group | Verbs |
 |---|---|
-| `auth` | doctor, login, logout, app-spec |
+| `auth` | doctor, login (including the Power Apps maker session), logout, app-spec |
 | `env` | profiles of defaults: add, set, rm, use, ls |
 | `pbi` | workspaces, inventory and diff, report and model details, DAX queries, refresh history and gated refresh, pull/push report and model definitions with backups, publish and deploy, data sources and parameters, clone and rebind, dashboards, screenshots and PNG export, sharing, models from SharePoint lists, repoint |
 | `sp` | sites, lists, columns, items, files, CSV/JSON export, Power Query snippets; writes: create lists and columns, add, update and delete items (recycle bin, eTag-safe), upload files |
@@ -30,7 +32,7 @@ It is built for an ordinary user on a work tenant. Nothing requires an admin rol
 | `data` | Dataverse queries and FetchXML |
 | `solution` | list, export, unpack, pack, check, deployment settings, import |
 | `test`, `connector`, `copilot`, `dlp` | DAX test suites, custom connectors, Copilot Studio publish checks, connector policy checks |
-| `raw`, `probe` | any documented endpoint with your token; discover what your account can reach |
+| `raw`, `probe`, `prefs` | any documented endpoint with your token; discover what your account can reach; your design preferences |
 
 ## Install
 

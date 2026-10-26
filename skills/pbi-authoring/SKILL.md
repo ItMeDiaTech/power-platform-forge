@@ -15,6 +15,10 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}/scripts/ppx" ppx --data-dir "${CLAUDE_PL
 
 Below, `ppx` stands for that prefix. Run `ppx auth doctor` once per session first (skill `pp-auth-doctor`).
 
+## Design preferences come first
+
+Before you create or change a report page, visual, measure or model, run `ppx prefs` (or read the MCP resource `ppx://design-preferences`) and follow the user's rules. If a request breaks one, say which rule and ask before going ahead. `ppx prefs --init` gives the user their own copy to edit; its path is in the envelope.
+
 ## Which path this tenant allows
 
 `routing.json` (written by `ppx probe`) decides; the envelope's `branch` says which ran.

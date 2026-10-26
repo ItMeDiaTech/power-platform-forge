@@ -13,6 +13,10 @@ Run verbs like this (or call the MCP tool `run` with `verb` and `args`, e.g. `{"
 uv run --project "${CLAUDE_PLUGIN_ROOT}/scripts/ppx" ppx --data-dir "${CLAUDE_PLUGIN_DATA}" sp fields ls --site Operations --list Tasks
 ```
 
+## Design preferences come first
+
+Before you create or change a list or column, run `ppx prefs` (or read the MCP resource `ppx://design-preferences`) and follow the user's rules. If a request breaks one, say which rule and ask before going ahead. `ppx prefs --init` gives the user their own copy to edit; its path is in the envelope.
+
 ## Before the first SharePoint call
 
 - Go straight to the verb. A missing sign-in or consent makes it exit 2 with the fix, so no doctor run is needed first. When a verb does exit 2 about tokens, run `ppx auth doctor --audience sharepoint` (it checks the profile's site; `--audience graph` covers `sp site search`) and follow the row's `fix`; Tier B setup is in `references/app-setup.md`.

@@ -78,10 +78,25 @@ ppx env add work --url https://contoso.crm.dynamics.com --workspace "Sales" --si
 
 SharePoint and Graph need your own app registration first (`ppx auth app-spec` prints it); if your tenant does not let you register or consent, `docs/ADMIN-REQUESTS.md` has the request to send IT. The command finds the plugin's data directory through a pointer file that the plugin writes when a Claude Code session starts, so start Claude Code once before the first sign-in.
 
+### Power Apps sharing, versions and restore: the maker session
+
+The Power Apps maker PowerShell module keeps its sign-in only inside the window that signed in. Once a day, run:
+
+```bash
+ppx auth login --backend maker
+```
+
+A Windows PowerShell window opens; sign in there and leave it open. `ppx pa share`, `pa versions`, `pa restore` and the canvas app list then run in it until you close it, run `ppx auth logout --backend maker`, or leave it unused for 8 hours. If the module needs you to sign in again meanwhile, it asks in that window. Only your Windows account can talk to it, and not over the network. `ppx auth doctor` shows whether it is running (and whether it is busy). Without it, those verbs give you the PowerShell lines to run yourself.
+
+## Your design preferences
+
+`ppx prefs` shows the rules the agent follows when it builds or changes a report, app or list: colours, fonts, page layout, naming, delegation and list-column rules. Run `ppx prefs --init` once to get your own copy, then edit it in any editor (the envelope prints its path, in the plugin's data folder, so updates never overwrite it). The plugin's MCP server also serves it as `ppx://design-preferences`, so you can @-mention it in Claude Code.
+
 ## What the plugin adds to a session
 
 - **Change notices.** Before a Bash, PowerShell or Power Platform MCP call that changes something, a one-line notice says what will change in plain English. Irreversible or costly changes ask first. `ppx env set --notice-mode confirm` makes every change ask; `docs/SAFETY.md` has the details.
 - **The `ppx` MCP server.** Three tools (`doctor`, `verbs`, `run`) that run any ppx verb in-process, so tokens and caches stay warm between calls.
+- **Your design preferences**, which the authoring skills read before they build anything (see above).
 - **Skills** that tell the agent which verb to use for each task, starting with `pp-auth-doctor`, and two agents, `pp-architect` and `pp-reviewer`.
 - **A PBIR schema check.** After the agent writes or edits a Power BI report definition file (`*.Report/definition/**/*.json`), it is checked against Microsoft's schema and any errors go back to the agent. The check advises; it never blocks.
 

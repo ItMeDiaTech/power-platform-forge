@@ -13,6 +13,10 @@ Run verbs like this (or call the MCP tool `run` with `verb` and `args`, e.g. `{"
 uv run --project "${CLAUDE_PLUGIN_ROOT}/scripts/ppx" ppx --data-dir "${CLAUDE_PLUGIN_DATA}" pa ls --list "<site>/Lists/<list>"
 ```
 
+## Design preferences come first
+
+Before you create or change a canvas app, form, view or sitemap, run `ppx prefs` (or read the MCP resource `ppx://design-preferences`) and follow the user's rules. If a request breaks one, say which rule and ask before going ahead. `ppx prefs --init` gives the user their own copy to edit; its path is in the envelope.
+
 ## Which verb answers which question
 
 | Question | Verb (fewest calls) |
@@ -49,7 +53,7 @@ Rules and fixes: `references/delegation-sharepoint.md`. Reading `.pa.yaml` yours
 
 - `pa share` resolves the UPN to an object id first (Microsoft Graph, cached); `--dry-run` shows it. The user is e-mailed about the share. A warning names the SharePoint lists the app reads: sharing the app does not give access to them, so tell the user to check the lists' permissions.
 - `pa restore` is irreversible: run it without `--yes` first (exit 2 lists the change), show the user, then re-run with `--yes` only after they agree. The exit-2 change list names the app's environment (the change notice cannot); pass `--environment` from `pa ls` or `pa versions` output when the user should see it there too. It lists versions first and records the version it replaces; the `undo` next action restores that one. It reports success only when a new latest version appears afterwards; "not confirmed" means check `pa versions` before retrying. A restored version is saved, not published: tell the user to publish it in Studio.
-- `pa share`, `pa versions` and `pa restore` use the Power Apps maker module in Windows PowerShell 5.1. Its sign-in lives only inside one PowerShell window, so ppx does not run it in the background: these verbs exit 2 with the exact lines (`Add-PowerAppsAccount; ...`) in `next_actions`. Give those lines to the user to paste into their own Windows PowerShell window (not pwsh); for a restore, the last line lists the versions so they can confirm it. If their sign-in is blocked, the step is done at make.powerapps.com. `pa ls` lists canvas apps through `pac` instead, which has no data sources: run `pa index` for those.
+- `pa share`, `pa versions`, `pa restore` and canvas `pa ls` use the Power Apps maker module in Windows PowerShell 5.1, whose sign-in lives only inside one PowerShell window. They run in the **maker session**: a window the user opens once a day with `ppx auth login --backend maker` (in their own terminal; they sign in there and leave it open). `ppx auth doctor` shows `maker_session.running`. Without it these verbs exit 2: hand the user the `ppx auth login --backend maker` line first; the next action holds the same step as `Add-PowerAppsAccount; ...` lines they can paste into Windows PowerShell (not pwsh) instead. If their sign-in is blocked, the step is done at make.powerapps.com. Without a session, `pa ls` lists canvas apps through `pac`, which has no data sources: run `pa index` for those.
 
 ## Model-driven apps
 
@@ -82,7 +86,8 @@ When no sign-in can get a Dataverse token, list reads (`pa flows`, `mda` lists, 
 
 | Exit | Message | Do |
 |---|---|---|
-| 2 | needs the maker module signed in within one PowerShell window | give the user the `Add-PowerAppsAccount; ...` line from `next_actions` for their own Windows PowerShell window |
+| 2 | needs the Power Apps maker session | give the user `ppx auth login --backend maker` for their own terminal (or the `Add-PowerAppsAccount; ...` line to paste) |
+| 1 | the maker session window gave no answer within N s, or is busy with other calls | ask the user to look at the ppx maker session window (it may ask them to sign in again); for share or restore, check whether it happened (`pa versions`) before retrying, since it may still complete |
 | 2 | maker module is not installed | give the user the `Install-Module` line from `next_actions` |
 | 2 | no Dataverse token for writes | the consent steps in `next_actions` |
 | 2 | needs the System Customizer role | give the user `data.admin_request` |

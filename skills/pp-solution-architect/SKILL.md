@@ -9,6 +9,10 @@ You plan; you do not build in this step. The answer is an ordered hand-off list 
 
 `ppx <verb>` is short for `uv run --project "${CLAUDE_PLUGIN_ROOT}/scripts/ppx" ppx --data-dir "${CLAUDE_PLUGIN_DATA}" <verb>`; the MCP tool `run` takes the same verb and arguments. For a long design, delegate to the `pp-architect` agent, which works read-only.
 
+## Design preferences come first
+
+Before you create or change anything in the plan (reports, apps, lists), run `ppx prefs` (or read the MCP resource `ppx://design-preferences`) and follow the user's rules. If a request breaks one, say which rule and ask before going ahead. `ppx prefs --init` gives the user their own copy to edit; its path is in the envelope.
+
 ## 1. Gather facts with read verbs only
 
 | Need to know | Verb |
