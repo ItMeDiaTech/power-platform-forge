@@ -8,7 +8,7 @@ new latest version, so the version it replaces is recorded first and is the undo
 
 from __future__ import annotations
 
-from ppx import ps5
+from ppx import maker_session, ps5
 from ppx.envelope import NextAction
 from ppx.errors import PpxError, UsageError
 from ppx.pa.inventory import find_app
@@ -51,6 +51,11 @@ def ls(ctx, args) -> dict:
 
 def restore(ctx, args) -> dict:
     app = find_app(ctx, "canvas", args.app, args.environment)
+    if not ps5.has_session():  # the whole restore as lines: note the current version, restore, then confirm
+        listing = ps5.cmdlet_line("Get-PowerAppVersion", {"AppName": app["id"]})
+        raise ps5.attended("restoring a version", [
+            listing, ps5.cmdlet_line("Restore-PowerAppVersion", {"AppName": app["id"], "AppVersionName": args.version}),
+            listing])
     items = versions(ctx, app)  # always first: the version being replaced is recorded before anything changes
     if args.version not in {v["id"] for v in items}:
         raise UsageError(f"{app.get('name')} has no version {args.version!r}; `ppx pa versions` lists them",
@@ -63,11 +68,14 @@ def restore(ctx, args) -> dict:
     ctx.changes.require_yes(ctx.yes)
     if ctx.dry_run:
         return {"app": _app(app), "version": args.version, "previous": previous}
-    if not ps5.SESSION_KEPT:  # the user restores in their own window; list versions after to confirm it
-        raise ps5.attended("restoring a version", [
-            ps5.cmdlet_line("Restore-PowerAppVersion", {"AppName": app["id"], "AppVersionName": args.version}),
-            ps5.cmdlet_line("Get-PowerAppVersion", {"AppName": app["id"]})])
-    ps5.maker("Restore-PowerAppVersion", {"AppName": app["id"], "AppVersionName": args.version}, ctx.timeout * 3)
+    try:
+        ps5.maker("Restore-PowerAppVersion", {"AppName": app["id"], "AppVersionName": args.version}, ctx.timeout * 3)
+    except maker_session.Busy as exc:  # the window may still finish it: retrying could restore twice
+        raise PpxError(f"{exc.message}. The restore may still complete: list the versions before you retry",
+                       data={"previous": previous}, next_actions=[
+                           NextAction("check whether it happened", command=f"ppx pa versions {app['id']}"),
+                           NextAction("if it did and you want it back, restore the version it replaced",
+                                      command=undo)]) from None
     # The cmdlet discards the service's answer, so success is the new latest version the restore saves.
     known = {v["id"] for v in items}
     new = [v for v in versions(ctx, app) if v["id"] not in known]

@@ -6,7 +6,8 @@ import re
 import urllib.parse
 from pathlib import Path
 
-from ppx import apis, cache, http, ps5
+from ppx import apis, cache, http, maker_session, ps5
+from ppx.envelope import NextAction
 from ppx.errors import PpxError, UsageError
 from ppx.pa.inventory import find_app
 
@@ -59,8 +60,12 @@ def run(ctx, args) -> dict:
                "user": args.user, "object_id": oid, "role": args.role}
     if ctx.dry_run:
         return summary
-    result = ps5.maker("Set-PowerAppRoleAssignment", {"AppName": app["id"], "EnvironmentName": env,
-                                                      "RoleName": args.role, "PrincipalType": "User",
-                                                      "PrincipalObjectId": oid}, ctx.timeout * 3)
+    try:
+        result = ps5.maker("Set-PowerAppRoleAssignment", {"AppName": app["id"], "EnvironmentName": env,
+                                                          "RoleName": args.role, "PrincipalType": "User",
+                                                          "PrincipalObjectId": oid}, ctx.timeout * 3)
+    except maker_session.Busy as exc:  # the window may still finish it, and the user would be e-mailed twice
+        raise PpxError(f"{exc.message}. The share may still complete: check the app's sharing before you retry",
+                       next_actions=[NextAction("check who the app is shared with", url=ps5.MAKER_URL)]) from None
     ps5.check_response("Set-PowerAppRoleAssignment", result)
     return {**summary, "shared": True}

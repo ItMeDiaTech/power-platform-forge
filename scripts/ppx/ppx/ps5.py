@@ -2,12 +2,12 @@
 
 The module keeps its sign-in only inside the PowerShell process that ran Add-PowerAppsAccount (module
 1.0.49 source: Get-JwtToken acquires interactively when the in-process session is empty; there is no
-token cache file). ppx starts a fresh hidden process per call, where the module would open a sign-in
-window and wait, which verbs must never do. So until a long-lived session helper hosts these calls
-(SESSION_KEPT), every maker call exits 2 with the exact lines for the user's own PowerShell window.
+token cache file). So maker scripts run in the session window that `ppx auth login --backend maker`
+opens and keeps signed in (ppx.maker_session); without that window they exit 2 with the exact lines
+for the user's own PowerShell window. Nothing here ever starts a hidden PowerShell.
 
-Arguments travel as JSON in an environment variable and the script reads them as `$in`, so an app
-name or a UPN is always data and can never become code.
+Arguments travel as JSON data and the script reads them as `$in`, so an app name or a UPN is always
+data and can never become code.
 """
 
 from __future__ import annotations
@@ -16,23 +16,14 @@ import json
 import re
 from http import HTTPStatus
 
-from ppx import auth, cmd_auth, proc
+from ppx import cmd_auth, maker_session
 from ppx.envelope import NextAction
 from ppx.errors import NeedsUser, PpxError, SetupNeeded
 from ppx.redact import scrub_text
 
-EXE = "powershell.exe"
-INPUT_VAR = "PPX_PS_INPUT"
 LOGIN = "ppx auth login --backend maker"
 MAKER_URL = "https://make.powerapps.com"
-SESSION_KEPT = False  # True only once a long-lived PowerShell process holds the maker sign-in
-# Windows PowerShell 5.1 writes redirected output in the OEM code page; ppx.proc decodes UTF-8.
-_PREFIX = ("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
-           "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; "
-           "$in = $env:PPX_PS_INPUT | ConvertFrom-Json; try { $out = & { ")
-_SUFFIX = (" }; if ($null -ne $out) { ConvertTo-Json -InputObject $out -Depth 6 -Compress } } "
-           "catch { ConvertTo-Json -InputObject @{error = [string]$_.Exception.Message; "
-           "category = [string]$_.CategoryInfo.Category} -Compress; exit 1 }")
+ps_quote = maker_session.ps_quote
 # No "unauthorized": a cmdlet refused for lack of permission must not read as a missing sign-in.
 _NO_SESSION = re.compile(r"Add-PowerAppsAccount|\bsign.?in\b|\blog.?in\b|authenticat|AADSTS|access token", re.I)
 _NO_MODULE = re.compile(r"is not recognized as the name of a cmdlet|CommandNotFound", re.I)
@@ -40,22 +31,23 @@ _NO_MODULE = re.compile(r"is not recognized as the name of a cmdlet|CommandNotFo
 
 def sign_in_needed(message: str) -> NeedsUser:
     return NeedsUser(message, next_actions=[
-        NextAction("sign in to the Power Apps maker module in your own terminal, then retry", command=LOGIN),
+        NextAction("sign in again in the ppx maker session window, or restart it in your own terminal", command=LOGIN),
         NextAction("if that sign-in is blocked, do this step in the maker portal instead", url=MAKER_URL)])
 
 
-def ps_quote(value) -> str:
-    """A PowerShell single-quoted literal: nothing inside it is expanded."""
-    return "'" + str(value).replace("'", "''") + "'"
-
-
 def attended(what: str, lines: list[str]) -> NeedsUser:
-    """The maker step as lines for the user's own Windows PowerShell window (see the module docstring)."""
-    return NeedsUser(f"{what} needs the Power Apps maker module signed in within one PowerShell window, which ppx "
-                     "cannot hold yet; run these lines in Windows PowerShell 5.1 (not pwsh), or use the maker portal",
-                     next_actions=[NextAction("run in Windows PowerShell 5.1", command="; ".join(["Add-PowerAppsAccount",
-                                                                                                  *lines])),
+    """No session window: how to start one, or the step as lines for the user's own PowerShell window."""
+    return NeedsUser(f"{what} needs the Power Apps maker session: start it once in your own terminal (a PowerShell "
+                     "window opens, you sign in, and it keeps the sign-in for the day), or run the lines yourself",
+                     next_actions=[NextAction("start the maker session (once a day)", command=LOGIN),
+                                   NextAction("or run these in Windows PowerShell 5.1 yourself",
+                                              command="; ".join(["Add-PowerAppsAccount", *lines])),
                                    NextAction("or do it in the maker portal", url=MAKER_URL)])
+
+
+def has_session() -> bool:
+    """Whether a maker session window answers right now."""
+    return maker_session.status()["running"]
 
 
 def cmdlet_line(cmdlet: str, params: dict) -> str:
@@ -63,20 +55,15 @@ def cmdlet_line(cmdlet: str, params: dict) -> str:
 
 
 def run(script: str, timeout: float, data: dict | None = None, attended_lines: list[str] | None = None):
-    """Run `script` in Windows PowerShell 5.1 and return its output parsed from JSON (None when it printed nothing).
+    """Run `script` in the maker session window and return its output parsed from JSON (None when it gave none).
 
-    Without a kept session it runs nothing and raises `attended` with `attended_lines` (default: the script).
+    Without a session window it runs nothing and raises `attended` with `attended_lines` (default: the script).
     """
-    if not SESSION_KEPT:
-        raise attended("this step", attended_lines or [script])
-    if '"' in script:  # Windows re-parses the command line; single quotes need no escaping there
+    if '"' in script:  # the scripts are static text; values only ever travel as data
         raise ValueError("ps5 scripts use single quotes only")
-    argv = [EXE, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", _PREFIX + script + _SUFFIX]
-    try:
-        p = proc.run(argv, timeout=timeout, env={INPUT_VAR: json.dumps(data or {})}, install_hint=auth.INSTALL[EXE])
-    except proc.ProcTimeout as exc:
-        raise sign_in_needed(f"Windows PowerShell gave no answer within {timeout:g} s; the maker module was "
-                             "probably waiting for a sign-in window") from exc
+    p = maker_session.call(script, data or {}, timeout)
+    if p is None:
+        raise attended("this step", attended_lines or [script])
     body = _last_json(p.stdout)
     if p.code == 0:
         return body

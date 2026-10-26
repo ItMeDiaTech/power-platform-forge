@@ -13,7 +13,7 @@ import urllib.request
 from functools import partial
 from pathlib import Path
 
-from ppx import apis, auth, exports, proc
+from ppx import apis, auth, exports, maker_session, proc
 from ppx.envelope import NextAction
 from ppx.errors import NeedsUser, PpxError, SetupNeeded, UsageError
 
@@ -238,7 +238,8 @@ def doctor(ctx, args) -> dict:
     probe_timeout, check_timeout = min(ctx.timeout, PROBE_TIMEOUT), min(ctx.timeout, CHECK_TIMEOUT)
     recorded = auth.routing(ctx.data_dir)
     working = [n for n, e in (recorded or {}).items() if e.get("read")]
-    jobs, unusable = {"prerequisites": partial(prerequisites, check_timeout)}, {}
+    jobs, unusable = {"prerequisites": partial(prerequisites, check_timeout),
+                      "maker_session": partial(maker_session.status, ctx.data_dir, check_timeout)}, {}
     for n in names:
         try:
             jobs[n] = partial(_probe, apis.by_name(n, ctx.profile).resource, ctx.data_dir, probe_timeout)
@@ -274,7 +275,9 @@ def doctor(ctx, args) -> dict:
     pre = done.get("prerequisites")
     if not isinstance(pre, list):
         pre = [{"name": "prerequisites", "found": False, "version": "no answer in time"}]
-    data = {"audiences": audiences, "prerequisites": pre}
+    session = done.get("maker_session")
+    data = {"audiences": audiences, "prerequisites": pre,
+            "maker_session": session if isinstance(session, dict) else {"running": False}}
     if not ok:
         raise NeedsUser("the APIs ppx needs cannot get a token yet; the user should run the next_actions "
                         "in their own terminal", data=data)
@@ -308,12 +311,18 @@ def login(ctx, args) -> dict:
         "pac": ["pac", "auth", "create"] + (["--environment", environment] if environment else []),
         "m365": ["m365", "login", "--authType", "browser"] + (["--appId", app_id] if app_id else [])
                 + (["--tenant", tenant] if tenant else []),
-        "maker": ["powershell.exe", "-NoProfile", "-Command", "Add-PowerAppsAccount"],
+        "maker": ["powershell.exe", "(the ppx maker session window)"],
         "fab": ["fab", "auth", "login"],
     }[backend]
-    ctx.changes.add(f"sign in to {backend}", "this computer", undo=f"ppx auth logout --backend {backend}")
+    what = ("open a PowerShell window that signs in to Power Apps once and keeps the sign-in for the day"
+            if backend == "maker" else f"sign in to {backend}")
+    ctx.changes.add(what, "this computer", undo=f"ppx auth logout --backend {backend}")
     if ctx.dry_run:
         return {"backend": backend, "command": " ".join(argv)}
+    if backend == "maker":
+        print("Opening the ppx maker session window: sign in there, then leave it open.", file=sys.stderr)
+        session = maker_session.start(ctx.need_data_dir())
+        return {"backend": backend, "signed_in": True, "session": session}
     code = proc.run_interactive(argv, install_hint=auth.INSTALL[argv[0]])
     if code != 0:
         fix = (NextAction("register your own app first", command="ppx auth app-spec")
@@ -335,12 +344,14 @@ def logout(ctx, args) -> dict:
         "az": ["az", "logout"],
         "pac": ["pac", "auth", "clear"],
         "m365": ["m365", "logout"],
-        "maker": ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Remove-PowerAppsAccount"],
+        "maker": ["(close the ppx maker session window)"],
         "fab": ["fab", "auth", "logout"],
     }[backend]
     ctx.changes.add(f"sign out of {backend}", "this computer", undo=f"ppx auth login --backend {backend}")
     if ctx.dry_run:
         return {"backend": backend, "command": " ".join(argv)}
+    if backend == "maker":  # the sign-in lives only in that window, so ending it signs out
+        return {"backend": backend, "signed_out": True, "session_ended": maker_session.stop(ctx.data_dir)}
     if backend in SOURCE_OF:  # first, so a missing or hung tool cannot keep the memoised tokens alive
         auth.clear(SOURCE_OF[backend], ctx.data_dir)
     p = proc.run(argv, timeout=ctx.timeout, install_hint=auth.INSTALL[argv[0]])

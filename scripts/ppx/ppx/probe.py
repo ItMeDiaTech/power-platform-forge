@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 
-from ppx import __version__, apis, auth, cmd_auth, http, pac, proc
+from ppx import __version__, apis, auth, cmd_auth, http, maker_session, pac, proc
 from ppx.errors import PpxError, UsageError
 from ppx.probe_records import (KINDS, ORDER, SLOW, _cell, _cli_failure, _dax_summary,
                                _definition_summary, _detail, _digest, _failure, _fields, _from_error, _json,
@@ -37,9 +37,6 @@ from ppx.verbs_core import AREAS
 DEVICE_FIELDS = ("AzureAdJoined", "WorkplaceJoined", "DeviceAuthStatus", "AzureAdPrt")
 DAX = 'EVALUATE ROW("n", 1)'
 _PS = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
-# 'Stop' turns a failed sign-in into a non-zero exit instead of an error record followed by success.
-_PS_APP = "$ErrorActionPreference = 'Stop'; Get-PowerApp | Select-Object -First 1 | ConvertTo-Json -Depth 4"
-_PS_AGAIN = "$ErrorActionPreference = 'Stop'; $null = Get-PowerApp | Select-Object -First 1; 'signed-in'"
 _PS_CMDLETS = ("$o = @{commands = @(Get-Command -Module Microsoft.PowerApps.PowerShell | ForEach-Object Name); "
                "help = @{}}; foreach ($c in 'Set-PowerAppRoleAssignment', 'Restore-PowerAppVersion') "
                "{ $o.help[$c] = @((Get-Help $c).parameters.parameter | ForEach-Object name) }; "
@@ -332,9 +329,12 @@ class _Probe(_WriteProbes):
             self.check("pa", "pac-canvas-download", self._canvas_download, spans=SLOW)
         else:
             self.skip("pa", "pac-canvas-download", "needs --app")
-        self.check("pa", "get-powerapp", partial(self._maker, _PS_APP), spans=SLOW)
-        # A fresh process shows whether the maker sign-in of the first one survives.
-        self.check("pa", "get-powerapp-again", partial(self._maker, _PS_AGAIN), spans=SLOW)
+        # Get-PowerApp signs in, which a fresh hidden PowerShell would do with a prompt: it runs only in the
+        # maker session window (PLATFORM-FACTS 20). Listing the cmdlets only loads the module, so it may run here.
+        if maker_session.status(self.ctx.data_dir)["running"]:
+            self.check("pa", "get-powerapp", self._maker_apps, spans=SLOW)
+        else:
+            self.skip("pa", "get-powerapp", "no maker session: run `ppx auth login --backend maker` first to include it")
         self.check("pa", "maker-cmdlets", self._cmdlets, spans=SLOW)
 
     def _canvas_list(self) -> dict:
@@ -379,16 +379,13 @@ class _Probe(_WriteProbes):
             found.append((self.args.list.lower(), "list"))
         return [(needle, what) for needle, what in found if needle]
 
-    def _maker(self, script: str) -> dict:
-        try:
-            p = proc.run([*_PS, script], timeout=self.timeout * SLOW, install_hint=auth.INSTALL["powershell.exe"])
-        except proc.ProcTimeout:
-            return {"status": "blocked", "code": "prompt", "summary": {"sign_in": "prompt"},
-                    "message": f"no answer within {self.timeout * SLOW:g} s; a sign-in window was probably waiting"}
+    def _maker_apps(self) -> dict:
+        p = maker_session.call("Get-PowerApp | Select-Object -First 1", {}, self.timeout * SLOW, self.ctx.data_dir)
+        if p is None:
+            return {"status": "blocked", "code": "no-session", "message": "the maker session window closed",
+                    "summary": {"sign_in": "no session"}}
         if p.code != 0:
             return {**_cli_failure(p), "summary": {"sign_in": "error"}}
-        if script == _PS_AGAIN:
-            return _ok({"sign_in": "silent"}, {"stdout": p.stdout})
         if not p.stdout.strip():
             return _ok({"apps": 0}, {"stdout": p.stdout})
         body = _json(p.stdout)
