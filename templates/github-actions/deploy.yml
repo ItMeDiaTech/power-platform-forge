@@ -1,0 +1,95 @@
+# TEMPLATE - adapt before use. Copy to .github/workflows/deploy.yml in the repository that holds the
+# unpacked solution (made by `ppx solution unpack`, packagetype Both), replace every <...>, and check
+# the result with `actionlint` before committing it.
+#
+# It packs the solution folder as a managed zip and imports it into one environment, signing in with
+# GitHub OIDC (workload identity federation): only the app id and tenant id are passed, never a client
+# secret. microsoft/powerplatform-actions uses federation whenever app-id and tenant-id are given
+# without client-secret (src/lib/auth/getCredentials.ts; announced as Preview in v1.5.0, discussion
+# #576); its README still documents only client secrets. If client-secret is ever added, the secret
+# sign-in silently wins.
+#
+# One-time setup (the app's owner can do 1 and 3; 2 needs an environment admin, see docs/ADMIN-REQUESTS.md):
+#   1. An app registration with a federated credential: issuer https://token.actions.githubusercontent.com,
+#      audience api://AzureADTokenExchange, subject repo:<org>/<repo>:environment:<github environment>
+#      (an exact match; a new credential can take minutes to start working).
+#   2. That app as an application user with a security role in the target Dataverse environment.
+#   3. Repository variables (Settings > Secrets and variables > Actions > Variables), not secrets:
+#      PP_APP_ID, PP_TENANT_ID, and on the GitHub environment PP_ENVIRONMENT_URL.
+#   4. A deployment settings file for the target, made with `ppx solution settings` and filled in.
+#
+# AADSTS70021 ("No matching federated identity record found") means the subject does not match the
+# credential exactly, or a new credential is still propagating. The sign-in check below tries twice,
+# two minutes apart; if both fail, compare the subject with the workflow's repository and environment.
+
+name: deploy-solution
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["solutions/<SolutionName>/**", "deployment-settings/<target>.json"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-<target>
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: <target>  # the GitHub environment named in the federated credential's subject
+    permissions:
+      contents: read
+      id-token: write  # lets the job request the OIDC token that replaces a client secret
+    env:
+      SOLUTION_NAME: <SolutionName>
+      SOLUTION_FOLDER: solutions/<SolutionName>
+      SETTINGS_FILE: deployment-settings/<target>.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Power Platform CLI
+        uses: microsoft/powerplatform-actions/actions-install@v1.9.2
+
+      - name: Check the federated sign-in
+        id: signin
+        continue-on-error: true  # Microsoft recommends retrying federated token requests (propagation delay)
+        uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
+        with:
+          environment-url: ${{ vars.PP_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+
+      - name: Wait for the federated credential to propagate
+        if: steps.signin.outcome == 'failure'
+        run: sleep 120
+
+      - name: Check the federated sign-in again
+        if: steps.signin.outcome == 'failure'
+        uses: microsoft/powerplatform-actions/who-am-i@v1.9.2
+        with:
+          environment-url: ${{ vars.PP_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+
+      - name: Pack the managed solution
+        uses: microsoft/powerplatform-actions/pack-solution@v1.9.2
+        with:
+          solution-folder: ${{ env.SOLUTION_FOLDER }}
+          solution-file: out/${{ env.SOLUTION_NAME }}_managed.zip
+          solution-type: Managed
+
+      - name: Import into the target environment
+        uses: microsoft/powerplatform-actions/import-solution@v1.9.2
+        with:
+          environment-url: ${{ vars.PP_ENVIRONMENT_URL }}
+          app-id: ${{ vars.PP_APP_ID }}
+          tenant-id: ${{ vars.PP_TENANT_ID }}
+          solution-file: out/${{ env.SOLUTION_NAME }}_managed.zip
+          use-deployment-settings-file: true
+          deployment-settings-file: ${{ env.SETTINGS_FILE }}
+          run-asynchronously: true
+          max-async-wait-time: 60
