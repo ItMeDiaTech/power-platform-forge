@@ -65,6 +65,10 @@ VERBS: tuple[Verb, ...] = (
                a("--app", help="scratch canvas app name")),
          # --model is only used by write probes, which take the model over: the hook asks, not just tells.
          escalate=(("--write", "change"), ("--model", "irreversible"))),
+    Verb(("prefs",), "Your design preferences: the rules the agent follows when it builds reports, apps and lists",
+         "read", "ppx.prefs:run", notice="Create your design preferences file on this computer from the defaults",
+         args=(a("--init", kind="flag", help="create your own copy of the defaults, to edit"),),
+         escalate=(("--init", "local"),)),
     Verb(("verbs",), "List ppx verbs by group, a group's verbs, or one verb's arguments", "read", "ppx.cmd_verbs:run",
          args=(a("group", kind="multi", help="a group (pbi) for its verbs, or a verb (pbi push) for its arguments",
                  required=False),), needs_data=False),

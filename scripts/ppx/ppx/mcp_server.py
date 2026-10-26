@@ -12,7 +12,7 @@ import shlex
 import sys
 import traceback
 
-from ppx import __version__, cli, verbtable
+from ppx import __version__, cli, prefs, verbtable
 from ppx.envelope import Envelope, NextAction, Result, dumps
 from ppx.errors import UsageError
 from ppx.redact import scrub, scrub_text
@@ -24,8 +24,13 @@ INSTRUCTIONS = (
     "Call verbs first to see each verb, its arguments and what it changes, then run. "
     "Every change produces a notice for the user; irreversible or costly changes need yes=true "
     "(dry_run=true lists them first). Sign-ins (auth login) are run by the user in their own terminal; "
-    "doctor shows what works."
+    "doctor shows what works. Before you build or change a report, app, form, view or list, read the user's "
+    "design preferences (resource ppx://design-preferences, or run verb prefs) and follow them."
 )
+PREFS_URI = "ppx://design-preferences"
+RESOURCES = [{"uri": PREFS_URI, "name": "design-preferences", "title": "Design preferences",
+              "description": "The user's rules for how Power BI reports, Power Apps and SharePoint lists are designed",
+              "mimeType": "text/markdown"}]
 TOOLS = [
     {"name": "doctor", "description": "Check ppx sign-ins, token reach per API and prerequisites. Read-only.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -132,12 +137,19 @@ def handle(line: bytes) -> dict | None:
     try:
         if method == "initialize":
             version = params.get("protocolVersion")
-            result = {"protocolVersion": version if version in VERSIONS else LATEST, "capabilities": {"tools": {}},
+            result = {"protocolVersion": version if version in VERSIONS else LATEST, "capabilities": {"tools": {}, "resources": {}},
                       "serverInfo": {"name": "ppx", "version": __version__}, "instructions": INSTRUCTIONS}
         elif method == "ping":
             result = {}
         elif method == "tools/list":
             result = {"tools": TOOLS}
+        elif method == "resources/list":
+            result = {"resources": RESOURCES}
+        elif method == "resources/read":
+            if params.get("uri") != PREFS_URI:
+                raise UsageError(f"unknown resource: {params.get('uri')}; resources: {PREFS_URI}")
+            text, _, _ = prefs.read()
+            result = {"contents": [{"uri": PREFS_URI, "mimeType": "text/markdown", "text": text}]}
         elif method == "tools/call":
             result = _tools_call(params)
         else:
