@@ -42,11 +42,23 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit",
+        "matcher": "Write",
         "hooks": [
           {
             "type": "command",
-            "if": "Edit(//**/*.Report/definition/**/*.json)",
+            "if": "Write(**/*.Report/definition/**/*.json)",
+            "command": "uv",
+            "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pbir_validate.py"],
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Edit(**/*.Report/definition/**/*.json)",
             "command": "uv",
             "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pbir_validate.py"],
             "timeout": 10
