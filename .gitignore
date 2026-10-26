@@ -7,8 +7,9 @@ docs/superpowers/
 /Building a Claude Plugin and CLI Harness*.md
 /powerplatform-forge-agent-brief.md
 
-# Test code and scratch scripts are local-only (see CLAUDE.md)
+# Test code, plugin evals and scratch scripts are local-only (see CLAUDE.md)
 tests/
+evals/
 scratch/
 test_*.py
 *_test.py
