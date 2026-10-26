@@ -28,6 +28,19 @@ else
   show() { git show ":$1"; }
 fi
 
+# List first, so a git failure (say, a "dubious ownership" refusal) fails the scan instead of
+# scanning nothing and passing.
+listing=$(mktemp) || exit 1
+trap 'rm -f "$listing"' EXIT
+if ! list > "$listing"; then
+  echo "check-secrets: git could not list the files to scan; nothing was checked" >&2
+  exit 1
+fi
+if [ "${1:-}" = "--all" ] && [ ! -s "$listing" ]; then
+  echo "check-secrets: no tracked files found; nothing was checked" >&2
+  exit 1
+fi
+
 status=0
 while IFS= read -r -d '' file; do
   # The scanner's own pattern lists would match themselves.
@@ -46,6 +59,6 @@ while IFS= read -r -d '' file; do
       status=1
     fi
   done <<< "$checks"
-done < <(list)
+done < "$listing"
 
 exit $status
