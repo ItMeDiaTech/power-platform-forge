@@ -1,6 +1,6 @@
 [project]
 name = "ppx"
-version = "0.2.0"
+version = "0.4.0"
 description = "JSON-emitting command-line harness for Power BI, Power Apps and SharePoint work."
 requires-python = ">=3.12"
 dependencies = []
@@ -10,7 +10,10 @@ ppx = "ppx.cli:main"
 ppx-mcp = "ppx.mcp_server:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3.8.0",
+]
 
 [tool.uv]
 # Runtime `uv run` must never need a package index, so dev tools install only on request.

@@ -1,6 +1,6 @@
 {
   "name": "power-platform-forge",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Terminal tooling for Power BI, Power Apps and SharePoint: a JSON-emitting CLI harness, skills, plain-English change notices and a local MCP server, so an agent can inventory, inspect, edit, publish and refresh work assets without driving a browser.",
   "author": {
     "name": "Austin Jordan",

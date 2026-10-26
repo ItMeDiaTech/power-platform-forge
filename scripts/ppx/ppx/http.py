@@ -15,13 +15,14 @@ import urllib.request
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 
+from ppx import __version__
 from ppx.envelope import NextAction
 from ppx.errors import PpxError
 from ppx.redact import scrub_text
 
 MAX_RETRIES = 3
 MAX_WAIT_SECONDS = 60
-USER_AGENT = "ppx/0.2 (power-platform-forge)"
+USER_AGENT = f"ppx/{__version__} (power-platform-forge)"
 
 
 @dataclass
