@@ -61,6 +61,7 @@ _CLAIMS = ("scp", "aud", "exp", "tid")
 
 _LOCK = threading.Lock()
 _MEMO: dict[tuple[str, str], "Token"] = {}
+_DISK_SEEN: dict[Path, tuple[tuple[int, int], dict]] = {}  # tokens.bin path -> (mtime, size) and its tokens
 
 
 @dataclass
@@ -334,6 +335,16 @@ def _memo(data_dir: Path | None) -> dict[tuple[str, str], Token]:
     """
     if not _on_disk(data_dir):
         return _MEMO
+    path = Path(data_dir) / MEMO_FILE
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    # Decrypt only when the file changed: a paged walk asks for a token on every page.
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    seen = _DISK_SEEN.get(path)
+    if seen and seen[0] == stamp:
+        return dict(seen[1])
     out = {}
     for e in _disk(data_dir):
         try:
@@ -341,7 +352,8 @@ def _memo(data_dir: Path | None) -> dict[tuple[str, str], Token]:
                                                                 float(e["expires_on"]))
         except (KeyError, TypeError, ValueError):
             continue
-    return out
+    _DISK_SEEN[path] = (stamp, out)
+    return dict(out)
 
 
 def _remember(resource: str, tok: Token, data_dir: Path | None) -> None:

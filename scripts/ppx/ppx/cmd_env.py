@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+
 from ppx import envs
 from ppx.errors import UsageError
 
@@ -56,7 +58,8 @@ def rm(ctx, args) -> dict:
     removed = ctx.state.profiles.pop(args.name)
     if ctx.state.current == args.name:
         ctx.state.current = next(iter(ctx.state.profiles), None)
-    undo = " ".join(["ppx env add", removed.name] + [f"--{k} {v}" for k, v in removed.to_dict().items() if k != "name"])
+    undo = shlex.join(["ppx", "env", "add", removed.name]
+                      + [part for k, v in removed.to_dict().items() if k != "name" for part in (f"--{k}", v)])
     ctx.changes.add(f"delete profile {args.name}", "this computer", undo=undo)
     _save(ctx)
     return {"removed": args.name, "active": ctx.state.current}

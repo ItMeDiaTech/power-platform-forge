@@ -59,7 +59,7 @@ VERBS: tuple[Verb, ...] = (
          args=(a("--area", help=f"comma-separated areas to probe: {','.join(AREAS)} or all (default: all)"),
                a("--write", kind="flag", help="also run write probes against the scratch items given"),
                a("--workspace", help="scratch workspace (name or id) for write probes"),
-               a("--model", help="scratch semantic model in that workspace"),
+               a("--model", help="scratch semantic model in that workspace; the probe takes it over, so --yes is needed"),
                a("--report", help="scratch report in that workspace"),
                a("--site", help="scratch SharePoint site URL"), a("--list", help="scratch SharePoint list title"),
                a("--app", help="scratch canvas app name")),

@@ -48,7 +48,7 @@ _BLOCK = re.compile(r"\s*[|>][-+0-9]*\s*(?:#.*)?$")  # a `key: |-` value: the de
 _AADSTS = re.compile(r"AADSTS(\d+)")
 _BANNER = re.compile(r"^[ \t]*Connected to\.*[ \t]*(\S.*?)[ \t\r]*$", re.M)  # pac names the environment it is signed in to
 _SIGN_IN = re.compile(r"log ?in|sign ?in|auth create|no profiles", re.I)
-_GUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
+_GUID = auth._GUID
 
 
 def run(ctx, args) -> dict:
@@ -78,6 +78,7 @@ def run(ctx, args) -> dict:
         _plan_writes(ctx, args, {kind: path.relative_to(data_dir).as_posix() for kind, path in backups.items()})
     if ctx.dry_run:
         return {"areas": areas, "write": bool(args.write)}
+    ctx.changes.require_yes(ctx.yes)
 
     probe = _Probe(ctx, args, backups, site)
     for area in areas:
@@ -118,8 +119,10 @@ def _plan_writes(ctx, args, backups: dict[str, str]) -> None:
         ctx.changes.add("write the model's own definition back unchanged (updateDefinition, allowPurgeData false)",
                         f"{where}, model {args.model}",
                         backup=f"<data>/{backups['model']} holds the definition pulled just before")
+        # Not reversible from here: only the previous owner can take it back, and its refresh
+        # credentials stay with them, so a wrongly named shared model can stop refreshing.
         ctx.changes.add("take over the model (you become its owner)", f"{where}, model {args.model}",
-                        undo="the previous owner can take it over again")
+                        reversible=False, undo="the previous owner can take it over again")
 
 
 class _Tokens:

@@ -11,6 +11,7 @@ import contextlib
 import importlib
 import os
 import sys
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from ppx import audit, datadir, envs
 from ppx.changes import ChangeSet
 from ppx.envelope import Envelope, NextAction, Result, dumps, fit_budget
 from ppx.errors import PpxError, SetupNeeded, UsageError
-from ppx.redact import scrub
+from ppx.redact import scrub, scrub_text
 from ppx.verbtable import GLOBAL_ARGS, VERBS, Arg, Verb
 
 
@@ -145,16 +146,20 @@ def _split_globals(argv: list[str]) -> list[str]:
     return front + rest
 
 
-def _project(data: dict, fields: list[str] | None) -> dict:
-    if not fields or not isinstance(data.get("items"), list):
+def _project(data: dict, fields: list[str] | None, top: int | None) -> dict:
+    """Apply --top and --fields to data.items for every verb, including those that ignore them."""
+    if not isinstance(data.get("items"), list):
         return data
-    data["items"] = [{k: v for k, v in item.items() if k in fields} if isinstance(item, dict) else item
-                     for item in data["items"]]
+    if top is not None and len(data["items"]) > top:
+        data["items"], data["more"] = data["items"][:top], True
+    if fields:
+        data["items"] = [{k: v for k, v in item.items() if k in fields} if isinstance(item, dict) else item
+                         for item in data["items"]]
     return data
 
 
 def _help(argv: list[str]) -> Result:
-    from ppx.cmd_verbs import describe
+    from ppx.cmd_verbs import GLOBAL_FLAGS, describe
     from ppx.verbtable import find
 
     words = [w for w in argv if not w.startswith("-")]
@@ -163,8 +168,7 @@ def _help(argv: list[str]) -> Result:
         rows = [r for r in describe(verb.path[0]) if r["verb"] == verb.name]
     else:
         rows = describe(words[0]) if words and any(v.path[0] == words[0] for v in VERBS) else describe()
-    env = Envelope(True, "help", {"count": len(rows), "items": rows,
-                                  "global_flags": "--profile --dry-run --yes --fields --top --timeout --raw --refresh --data-dir"})
+    env = Envelope(True, "help", {"count": len(rows), "items": rows, "global_flags": GLOBAL_FLAGS})
     return Result(fit_budget(env.to_dict()), 0)
 
 
@@ -207,6 +211,8 @@ def dispatch(argv: list[str], *, interactive: bool = True, environ: dict | None 
         profile = state.profiles.get(args.profile) if args.profile else state.active()
         if args.profile and profile is None:
             raise UsageError(f"no profile named {args.profile!r}; `ppx env ls` lists them")
+        if args.top is not None and args.top < 1:
+            raise UsageError(f"--top must be 1 or more, not {args.top}")
         ctx = Ctx(verb=verb, data_dir=data_dir, state=state, profile=profile, dry_run=args.dry_run, yes=args.yes,
                   raw=args.raw, refresh=args.refresh, top=args.top, timeout=float(args.timeout),
                   fields=[f.strip() for f in args.fields.split(",") if f.strip()] if args.fields else None,
@@ -221,9 +227,11 @@ def dispatch(argv: list[str], *, interactive: bool = True, environ: dict | None 
             data.setdefault("changes", ctx.changes.to_list())
             if ctx.dry_run:
                 data["dry_run"] = True
-        env = Envelope(True, operation, _project(data, ctx.fields), ctx.warnings, ctx.next_actions, ctx.target_env)
+        env = Envelope(True, operation, _project(data, ctx.fields, ctx.top), ctx.warnings, ctx.next_actions,
+                       ctx.target_env)
         result = Result(env.to_dict(), 0)
-    except PpxError as exc:
+    except Exception as caught:
+        exc = caught if isinstance(caught, PpxError) else _unexpected(caught)
         warnings = ctx.warnings if ctx else []
         nxt = (ctx.next_actions if ctx else []) + exc.next_actions
         data = {"error": exc.message, **exc.data}
@@ -236,6 +244,13 @@ def dispatch(argv: list[str], *, interactive: bool = True, environ: dict | None 
     if not (ctx and ctx.raw):
         out = fit_budget(out)
     return Result(out, result.exit_code)
+
+
+def _unexpected(exc: Exception) -> PpxError:
+    """A bug or an unexpected reply (say, a proxy's HTML page) still ends in one envelope and an audit line."""
+    print(scrub_text(traceback.format_exc()), file=sys.stderr)
+    return PpxError(f"unexpected {type(exc).__name__}: {scrub_text(' '.join(str(exc).split()))[:300]}",
+                    next_actions=[NextAction("check the network or proxy, then retry; the details are on stderr")])
 
 
 def _audit(ctx: Ctx | None, argv: list[str], result: Result) -> None:

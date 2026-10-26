@@ -60,6 +60,7 @@ def fit_budget(env: dict, limit: int = BUDGET_BYTES) -> dict:
         return env
     cut: dict[str, int] = {}
     lists = _lists(env.get("data", {}), "data")
+    warnings = list(env.get("warnings", []))
     for _ in range(64):
         if len(dumps(env).encode()) <= limit or not lists:
             break
@@ -70,13 +71,13 @@ def fit_budget(env: dict, limit: int = BUDGET_BYTES) -> dict:
             continue
         cut.setdefault(path, len(items))
         holder[key] = items[: max(1, len(items) // 2)]
-    if cut:
+        # Noted inside the loop, so the note itself counts against the budget.
         env.setdefault("data", {})["truncated"] = cut
-        env.setdefault("warnings", []).append(
+        env["warnings"] = warnings + [
             "output shortened to fit 4 KB: "
             + ", ".join(f"{p} kept {len(_get(env, p))} of {n}" for p, n in cut.items())
             + "; narrow with --top or --fields, or pass --raw"
-        )
+        ]
     return env
 
 

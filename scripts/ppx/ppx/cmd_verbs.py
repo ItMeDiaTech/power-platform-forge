@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from ppx.errors import UsageError
-from ppx.verbtable import VERBS, Arg
+from ppx.verbtable import GLOBAL_ARGS, VERBS, Arg
+
+GLOBAL_FLAGS = " ".join(a.flags[0] for a in GLOBAL_ARGS)
 
 
 def _arg(a: Arg) -> str:
@@ -29,5 +31,4 @@ def run(ctx, args) -> dict:
     items = describe(args.group)
     if args.group and not items:
         raise UsageError(f"no verb group {args.group!r}; groups: {', '.join(sorted({v.path[0] for v in VERBS}))}")
-    return {"count": len(items), "items": items,
-            "global_flags": "--profile --dry-run --yes --fields --top --timeout --raw --refresh --data-dir"}
+    return {"count": len(items), "items": items, "global_flags": GLOBAL_FLAGS}

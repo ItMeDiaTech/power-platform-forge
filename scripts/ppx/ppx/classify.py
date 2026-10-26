@@ -349,9 +349,6 @@ def _ppx(tokens: list[str]) -> Classification:
     while j < len(args):
         key, eq, val = args[j].partition("=")
         arg = by_flag.get(key)
-        if arg is None and key.startswith("--") and len(key) > 2:  # argparse also takes a unique prefix: --wr is --write
-            hits = {a.dest: a for f, a in by_flag.items() if f.startswith(key)}
-            arg = hits.popitem()[1] if len(hits) == 1 else None
         if arg is None:
             pos = None if args[j].startswith("-") else next(positionals, None)
             if pos is not None:
@@ -406,8 +403,15 @@ def _python(words: list[str]) -> Classification:
             continue
         if w == "-m":
             return _ppx(words[i + 2:]) if words[i + 1:i + 2] in (["ppx"], ["ppx.cli"]) else READ
-        if w == "-c" or not w.startswith("-"):
-            return READ  # a script or inline code: its effect is not visible here
+        if w == "-c":
+            # Inline code is visible: if it reaches a Power Platform API or ppx, ask rather than guess.
+            code = words[i + 1] if i + 1 < len(words) else ""
+            if any(_pp_host(m) for m in _URL.finditer(code)) or re.search(r"\bppx\b", code):
+                return Classification("unknown", _clip(f"inline Python that calls a Power Platform API or ppx: "
+                                                       f"{' '.join(code.split())}"), "python")
+            return READ
+        if not w.startswith("-"):
+            return READ  # shortcut: a script file's effect is not visible here; read it if this ever matters
         i += 1
     return READ
 

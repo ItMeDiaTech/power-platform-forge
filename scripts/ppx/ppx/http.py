@@ -29,6 +29,7 @@ class Response:
     status: int
     headers: dict[str, str] = field(default_factory=dict)
     body: bytes = b""
+    url: str = ""  # the request URL; links in the reply are only followed on its host
 
     def json(self):
         if not self.body.strip():
@@ -38,7 +39,11 @@ class Response:
 
 class Transport:
     def send(self, method: str, url: str, headers: dict, body: bytes | None, timeout: float) -> Response:
-        req = urllib.request.Request(url, data=body, method=method, headers=headers)
+        req = urllib.request.Request(url, data=body, method=method,
+                                     headers={k: v for k, v in headers.items() if k.lower() != "authorization"})
+        if "Authorization" in headers:
+            # Unredirected: urllib copies ordinary headers to a redirect's target, even on another host.
+            req.add_unredirected_header("Authorization", headers["Authorization"])
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return Response(resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read())
@@ -65,6 +70,15 @@ class HttpError(PpxError):
 def _short(url: str) -> str:
     parts = urllib.parse.urlsplit(url)
     return f"{parts.netloc}{parts.path}"
+
+
+def _same_host(link: str, base: str) -> str:
+    """`link` made absolute against `base`, refused when it leaves base's host: the token goes with it."""
+    absolute = urllib.parse.urljoin(base, link)
+    host = urllib.parse.urlsplit(absolute).hostname
+    if host != urllib.parse.urlsplit(base).hostname:
+        raise PpxError(f"{_short(base)} pointed to another host ({host}); ppx does not send your token there")
+    return absolute
 
 
 def _error_parts(resp: Response) -> tuple[str | None, str | None]:
@@ -143,6 +157,7 @@ def request(method: str, url: str, *, audience: str, op: str = "read", json_body
             continue
         if resp.status >= 400:
             raise HttpError(method, url, resp)
+        resp.url = url
         return resp
 
 
@@ -165,10 +180,10 @@ def paged(url: str, *, audience: str, top: int | None = None, params: dict | Non
                     token_provider=token_provider) or {}
         page = body.get("value", body.get("data", [])) if isinstance(body, dict) else body
         items.extend(page or [])
+        nxt = _next_link(body, url)
         if top is not None and len(items) >= top:
-            nxt = _next_link(body, url)
             return items[:top], bool(nxt) or len(items) > top
-        next_url, next_params = _next_link(body, url), None
+        next_url, next_params = (_same_host(nxt, url) if nxt else None), None
     return items, False
 
 
@@ -195,6 +210,7 @@ def wait_operation(resp: Response, *, audience: str, timeout: float = 600, token
     location = resp.headers.get("location")
     if not location:
         return resp.json()
+    location = _same_host(location, resp.url)
     deadline = time.monotonic() + timeout
     delay = _retry_after(resp, 0)
     while True:
@@ -207,7 +223,7 @@ def wait_operation(resp: Response, *, audience: str, timeout: float = 600, token
         status = str(body.get("status", "")).lower()
         if status in ("succeeded", "completed"):
             if fetch_result:
-                result_url = poll.headers.get("location") or location.rstrip("/") + "/result"
+                result_url = _same_host(poll.headers.get("location") or location.rstrip("/") + "/result", location)
                 return call("GET", result_url, audience=audience, token_provider=token_provider)
             return body
         if status in ("failed", "cancelled", "canceled"):
