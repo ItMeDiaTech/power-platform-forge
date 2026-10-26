@@ -1,0 +1,42 @@
+# AI research, briefs, plans and agent instructions stay local (see CLAUDE.md)
+.ai/
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+docs/superpowers/
+/Building a Claude Plugin and CLI Harness*.md
+/powerplatform-forge-agent-brief.md
+
+# Test code and scratch scripts are local-only (see CLAUDE.md)
+tests/
+scratch/
+test_*.py
+*_test.py
+conftest.py
+
+# Credentials and sensitive files
+.env
+.env.*
+*.pfx
+*.p12
+*.pem
+*.key
+secrets/
+envs.json
+prod-allowlist.json
+audit.jsonl
+*.secret
+
+# Python / uv
+__pycache__/
+.venv/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
