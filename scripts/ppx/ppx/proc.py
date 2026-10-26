@@ -76,4 +76,4 @@ def run(argv: list[str], *, timeout: float, input_text: str | None = None,
 def run_interactive(argv: list[str], *, install_hint: str | None = None) -> int:
     """Run with the user's terminal attached (sign-in flows). The MCP server never calls this."""
     exe = require(argv[0], install_hint or f"install {argv[0]}")
-    return subprocess.call([exe, *argv[1:]])
+    return subprocess.call([exe, *argv[1:]], stdout=sys.stderr)

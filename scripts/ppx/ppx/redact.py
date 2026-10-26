@@ -9,7 +9,8 @@ _SECRET_KEY = re.compile(r"^(token|sig|authorization|credentials|credentialdetai
 _PATTERNS = [
     re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"),
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/-]{16,}=*"),
-    re.compile(r"(?i)([?&](?:sig|token|code)=)[^&\s\"']+"),
+    # A purely numeric code= is an AADSTS error-lookup URL, not an OAuth code, so it is kept.
+    re.compile(r"(?i)([?&](?:sig|token|code)=)(?!\d{1,10}(?:[&\s\"']|$))[^&\s\"']+"),
     re.compile(r"(?i)((?:--clientSecret|-cs|--certificatePassword|-cp|--password|-p)[ =])\S+"),
 ]
 

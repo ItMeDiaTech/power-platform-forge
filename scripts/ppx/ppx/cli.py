@@ -63,8 +63,15 @@ class Ctx:
 
 
 class _Parser(argparse.ArgumentParser):
+    """No help exit and no abbreviations: the parser and the change-notice classifier must agree exactly."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("add_help", False)
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
     def error(self, message: str):  # argparse would print and exit; ppx answers with an envelope instead
-        raise UsageError(f"{message}; usage: {self.format_usage().strip()}")
+        raise UsageError(f"{message}; run `ppx <verb> --help` or `ppx verbs` for the arguments")
 
 
 def _add_arg(parser: argparse.ArgumentParser, arg: Arg) -> None:
@@ -146,10 +153,44 @@ def _project(data: dict, fields: list[str] | None) -> dict:
     return data
 
 
+def _help(argv: list[str]) -> Result:
+    from ppx.cmd_verbs import describe
+    from ppx.verbtable import find
+
+    words = [w for w in argv if not w.startswith("-")]
+    verb, _ = find(words)
+    if verb is not None:
+        rows = [r for r in describe(verb.path[0]) if r["verb"] == verb.name]
+    else:
+        rows = describe(words[0]) if words and any(v.path[0] == words[0] for v in VERBS) else describe()
+    env = Envelope(True, "help", {"count": len(rows), "items": rows,
+                                  "global_flags": "--profile --dry-run --yes --fields --top --timeout --raw --refresh --data-dir"})
+    return Result(fit_budget(env.to_dict()), 0)
+
+
+@contextlib.contextmanager
+def _data_dir_env(data_dir: Path | None):
+    """Token lookups deep in ppx.http find the same data directory the command line chose."""
+    if data_dir is None:
+        yield
+        return
+    previous = os.environ.get("PPX_DATA_DIR")
+    os.environ["PPX_DATA_DIR"] = str(data_dir)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("PPX_DATA_DIR", None)
+        else:
+            os.environ["PPX_DATA_DIR"] = previous
+
+
 def dispatch(argv: list[str], *, interactive: bool = True, environ: dict | None = None) -> Result:
     """Run one ppx command line and return its envelope. Never prints to stdout."""
     operation = "ppx"
     ctx: Ctx | None = None
+    if "-h" in argv or "--help" in argv:
+        return _help(list(argv))
     try:
         args = build_parser().parse_args(_split_globals(list(argv)))
         verb: Verb | None = getattr(args, "_verb", None)
@@ -174,7 +215,7 @@ def dispatch(argv: list[str], *, interactive: bool = True, environ: dict | None 
             ctx.target_env = {"name": profile.name, "url": profile.url}
         module_name, func_name = verb.handler.split(":")
         handler = getattr(importlib.import_module(module_name), func_name)
-        with contextlib.redirect_stdout(sys.stderr):  # nothing but the envelope may reach stdout
+        with contextlib.redirect_stdout(sys.stderr), _data_dir_env(data_dir):  # only the envelope reaches stdout
             data = handler(ctx, args) or {}
         if ctx.changes.items:
             data.setdefault("changes", ctx.changes.to_list())
@@ -210,9 +251,28 @@ def _audit(ctx: Ctx | None, argv: list[str], result: Result) -> None:
         result.envelope.setdefault("warnings", []).append(f"audit log not written: {exc}")
 
 
+def _console_attached() -> bool:
+    """True only for a real terminal. On Windows isatty() is also True for NUL, which is what an
+    agent's PowerShell tool and `< /dev/null` give, so ask the console API instead."""
+    if not sys.stdin.isatty():
+        return False
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    mode = wintypes.DWORD()
+    try:
+        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+    except OSError:
+        return False
+    return bool(ctypes.windll.kernel32.GetConsoleMode(wintypes.HANDLE(handle), ctypes.byref(mode)))
+
+
 def main(argv: list[str] | None = None) -> int:
     result = dispatch(sys.argv[1:] if argv is None else argv,
-                      interactive=sys.stdin.isatty() or os.environ.get("PPX_INTERACTIVE") == "1")
+                      interactive=_console_attached() or os.environ.get("PPX_INTERACTIVE") == "1")
     sys.stdout.write(dumps(result.envelope) + "\n")
     sys.stdout.flush()
     return result.exit_code
