@@ -1,6 +1,6 @@
 """PostToolUse hook (advisory): check an edited PBIR file against its vendored JSON schema.
 
-Runs after Write and Edit, filtered by `if: Write(**/*.Report/definition/**/*.json)` and the same Edit rule: an
+Runs after Write and Edit, filtered by `if: Write(//**/*.Report/definition/**/*.json)` and the same Edit rule: an
 `if` rule matches its own tool name only (an Edit rule never fires for Write; live, PLATFORM-FACTS). The path check
 below is the backstop. Only files whose `$schema`
 URL is vendored under templates/pbir-schemas are checked. A violation exits 2 so the schema errors reach Claude;

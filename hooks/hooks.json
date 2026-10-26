@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Write(**/*.Report/definition/**/*.json)",
+            "if": "Write(//**/*.Report/definition/**/*.json)",
             "command": "uv",
             "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pbir_validate.py"],
             "timeout": 10
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Edit(**/*.Report/definition/**/*.json)",
+            "if": "Edit(//**/*.Report/definition/**/*.json)",
             "command": "uv",
             "args": ["run", "--no-project", "--offline", "--python", ">=3.12", "python", "-I", "-S", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pbir_validate.py"],
             "timeout": 10
