@@ -1,0 +1,13 @@
+table $table
+
+$columns	partition $partition = m
+		mode: import
+		source =
+				let
+				    Source = SharePoint.Tables($site, [Implementation="2.0", ViewMode=$view]),
+				    Items = Source{[Id=$list_id]}[Items],
+				    Kept = Table.SelectColumns(Items, {$names}, MissingField.UseNull),
+				    Typed = Table.TransformColumnTypes(Kept, {$types})
+				in
+				    Typed
+
