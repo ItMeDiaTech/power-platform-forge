@@ -1,27 +1,34 @@
 # Power Platform Forge
 
-A Claude Code plugin and CLI harness that lets an AI agent design, build, test and ship a complete Microsoft Power Platform solution end to end: a Dataverse schema, Power Apps (model-driven, canvas or code apps), Power Automate flows, a Power BI model and report over Fabric, a Copilot Studio agent and custom connectors, delivered as one managed solution through a pipeline, with production guardrails enforced in code.
+A Claude Code plugin for people who work with many Power BI reports, Power Apps and SharePoint lists every day. It gives an AI agent compact command-line tools for that work, so it can inventory, inspect, edit, publish and refresh your assets without driving a browser, which is slow and burns tokens.
 
-> **Status: planning.** No code yet. The first phase scaffolds the plugin manifests, the `ppx` harness and the production guard.
+It is built for an ordinary user on a work tenant. Nothing requires an admin role or a service principal. Where a feature needs an admin setting, the tool says so and names the request to send to IT.
 
-## Why
+> **Status: early development.** This release ships the plugin manifests and the install and update path. The `ppx` harness, change notices, skills and the MCP server arrive in the next releases.
 
-Microsoft now ships official agent plugins for canvas, model-driven and code apps, Power Pages, Power Automate, Power BI and Fabric. None of them covers the work that spans products: solution ALM, Dataverse schema-as-code, custom connectors, Copilot Studio sync, testing, auth diagnosis and environment safety. This project depends on Microsoft's plugins for authoring and owns the glue.
+## What it ships
 
-## What it will ship
+- **`ppx`**, a command-line harness that prints one small JSON envelope per command. It reads Power BI REST, Fabric REST, the Dataverse Web API and SharePoint through `az`, `pac` and the CLI for Microsoft 365, pages and summarises large results, and writes big artifacts (report definitions, exports) to disk instead of the conversation.
+- **A local MCP server, `ppx`**, with three tools (`doctor`, `verbs`, `run`) that drive the same harness for clients without a shell.
+- **Change notices.** Before any command changes something in your tenant, you see a plain-English line saying what will change and where. Irreversible changes and unrecognised commands ask first. Every change is recorded with a backup and an undo command where one exists.
+- **Skills** that route the agent to the right `ppx` verb or to Microsoft's own agent plugins for authoring (Power BI models and reports, canvas apps, flows).
 
-- **`ppx`**, a JSON-emitting CLI harness over `pac`, `fab`, the Dataverse Web API, the Power BI and Fabric REST APIs and the Power Platform API. One response envelope, `--dry-run` and `--yes` on every mutating verb, an audit log, throttling and long-running-operation polling built in.
-- **Skills:** `pp-auth-doctor`, `pp-solution-alm`, `dataverse-schema`, `custom-connector`, `copilot-studio-agent`, `pp-testing`, `fabric-link-analytics`, `pp-solution-architect`.
-- **Agents:** `pp-architect` (plans with read-only tools), `pp-deployer` (the only agent that imports or deploys), `pp-reviewer` (solution checker, best-practice analysis, schema validation).
-- **Hooks:** a `PreToolUse` guard that blocks destructive commands against production environments unless explicitly allow-listed, and `PostToolUse` validators for TMDL, PBIR and YAML.
-- **Dual manifest** so it installs in both Claude Code and GitHub Copilot CLI.
+## Install
+
+In Claude Code:
+
+```text
+/plugin install power-platform-forge --marketplace ItMeDiaTech/power-platform-forge
+```
+
+Prerequisites, the update command and uninstall are in [docs/SETUP.md](docs/SETUP.md).
+
+## Documentation
+
+- [docs/SETUP.md](docs/SETUP.md): prerequisites, install, update, uninstall.
+- [docs/PLATFORM-FACTS.md](docs/PLATFORM-FACTS.md): what the plugin assumes about Claude Code and Microsoft's APIs, with dated evidence.
 
 ## Repository conventions
 
-- Secrets never enter git. `scripts/check-secrets.sh` runs as a pre-commit hook. Enable it once per clone:
-
-  ```bash
-  git config core.hooksPath .githooks
-  ```
-
-- Tokens come from `az`, `pac auth` and `fab auth`. Nothing in this repository stores them.
+- Secrets and tenant identifiers never enter git. `scripts/check-secrets.sh` runs as a pre-commit hook; enable it once per clone with `git config core.hooksPath .githooks`.
+- Tokens come from `az`, `pac auth` and the CLI for Microsoft 365. Nothing in this repository stores them.
