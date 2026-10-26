@@ -19,11 +19,21 @@ GUID	[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}
 # Public Microsoft first-party ids (resource apps, the Azure CLI client) may be added to the
 # GUID allow pattern above; never add an id that belongs to a tenant, user or item.
 
+if [ "${1:-}" = "--all" ]; then
+  # Scan every tracked file's working-tree content (used by the local gate), not just the index.
+  list() { git ls-files -z; }
+  show() { cat -- "$1"; }
+else
+  list() { git diff --cached --name-only --diff-filter=ACMR -z; }
+  show() { git show ":$1"; }
+fi
+
 status=0
 while IFS= read -r -d '' file; do
   # The scanner's own pattern lists would match themselves.
   [ "$file" = "scripts/check-secrets.sh" ] && continue
-  content=$(git show ":$file")
+  [ -f "$file" ] || continue
+  content=$(show "$file")
   if printf '%s' "$content" | grep -Eaq "$secret"; then
     echo "check-secrets: credential-shaped content in $file; remove it before committing" >&2
     status=1
@@ -36,6 +46,6 @@ while IFS= read -r -d '' file; do
       status=1
     fi
   done <<< "$checks"
-done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+done < <(list)
 
 exit $status
