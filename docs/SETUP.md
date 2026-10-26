@@ -12,7 +12,7 @@ The plugin runs on the machine that can reach your work tenant (your work laptop
 
 The harness itself has no third-party Python dependencies, so after uv has a Python the plugin needs no package index.
 
-The Power Platform command-line tools below are needed for the verbs that use them. `ppx auth doctor` (added in the next release) reports which ones are missing and the exact install command.
+The Power Platform command-line tools below are needed for the verbs that use them. `ppx auth doctor` reports which ones are missing and the exact install command.
 
 | Tool | Used for | Install |
 |---|---|---|
@@ -20,7 +20,7 @@ The Power Platform command-line tools below are needed for the verbs that use th
 | Power Platform CLI (`pac`) | Dataverse, solutions, canvas app source | needs the .NET 8 SDK or later, then `dotnet tool install --global Microsoft.PowerApps.CLI.Tool` |
 | CLI for Microsoft 365 (`m365`) | SharePoint lists and files | needs Node.js 22 or later, then `npm install -g @pnp/cli-microsoft365` |
 | Power Apps maker PowerShell module | Sharing and restoring canvas apps | in Windows PowerShell 5.1: `Install-Module Microsoft.PowerApps.PowerShell -Scope CurrentUser` |
-| Power BI Desktop (optional) | Local edit round trip and screenshots | Microsoft Store or <https://powerbi.microsoft.com/desktop> |
+| Power BI Desktop (optional) | Local edit round trip and screenshots | `winget install -e --id Microsoft.PowerBI`, or the Microsoft Store |
 
 Behind a corporate proxy, set `HTTPS_PROXY` and `HTTP_PROXY` before installing; uv and npm both honour them.
 
@@ -57,7 +57,32 @@ claude plugin install power-platform-forge@power-platform-forge
 claude plugin update power-platform-forge@power-platform-forge
 ```
 
-Then run `/reload-plugins` in any open session. `claude plugin marketplace update` on its own only refreshes the listing; it does not install the new version.
+Then run `/reload-plugins` in any open session, and `uv tool upgrade ppx` if you installed the command below. `claude plugin marketplace update` on its own only refreshes the listing; it does not install the new version.
+
+## Sign in from your own terminal
+
+Sign-in opens a browser, so it never runs inside Claude Code. Install the same harness as a command for your own terminal once:
+
+```bash
+uv tool install --from "git+https://github.com/ItMeDiaTech/power-platform-forge#subdirectory=scripts/ppx" ppx
+uv tool update-shell
+```
+
+Open a new terminal, then sign in with the tools you use. `ppx auth doctor` lists exactly which lines you still need:
+
+```bash
+ppx auth login --backend az
+ppx auth login --backend pac --environment https://contoso.crm.dynamics.com
+ppx env add work --url https://contoso.crm.dynamics.com --workspace "Sales" --site https://contoso.sharepoint.com/sites/Finance --use
+```
+
+SharePoint and Graph need your own app registration first (`ppx auth app-spec` prints it); if your tenant does not let you register or consent, `docs/ADMIN-REQUESTS.md` has the request to send IT. The command finds the plugin's data directory through a pointer file that the plugin writes when a Claude Code session starts, so start Claude Code once before the first sign-in.
+
+## What the plugin adds to a session
+
+- **Change notices.** Before a Bash, PowerShell or Power Platform MCP call that changes something, a one-line notice says what will change in plain English. Irreversible or costly changes ask first. `ppx env set --notice-mode confirm` makes every change ask; `docs/SAFETY.md` has the details.
+- **The `ppx` MCP server.** Three tools (`doctor`, `verbs`, `run`) that run any ppx verb in-process, so tokens and caches stay warm between calls.
+- **Skills** that tell the agent which verb to use for each task, starting with `pp-auth-doctor`.
 
 ## Uninstall
 
