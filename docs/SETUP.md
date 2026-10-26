@@ -18,7 +18,7 @@ The Power Platform command-line tools below are needed for the verbs that use th
 |---|---|---|
 | Azure CLI | Tokens for Power BI, Fabric and the Dataverse Web API | `winget install -e --id Microsoft.AzureCLI` |
 | Power Platform CLI (`pac`) | Dataverse, solutions, canvas app source | needs the .NET 8 SDK or later, then `dotnet tool install --global Microsoft.PowerApps.CLI.Tool` |
-| CLI for Microsoft 365 (`m365`) | SharePoint lists and files | needs Node.js 22 or later, then `npm install -g @pnp/cli-microsoft365` |
+| CLI for Microsoft 365 (`m365`) | SharePoint lists and files | needs Node.js 22 or later, then `npm install -g @pnp/cli-microsoft365@11` (ppx is written for version 11; version 12 changes how deletes reach the recycle bin) |
 | Power Apps maker PowerShell module | Sharing and restoring canvas apps | in Windows PowerShell 5.1: `Install-Module Microsoft.PowerApps.PowerShell -Scope CurrentUser` |
 | Power BI Desktop (optional) | Local edit round trip and screenshots | `winget install -e --id Microsoft.PowerBI`, or the Microsoft Store |
 
@@ -82,7 +82,8 @@ SharePoint and Graph need your own app registration first (`ppx auth app-spec` p
 
 - **Change notices.** Before a Bash, PowerShell or Power Platform MCP call that changes something, a one-line notice says what will change in plain English. Irreversible or costly changes ask first. `ppx env set --notice-mode confirm` makes every change ask; `docs/SAFETY.md` has the details.
 - **The `ppx` MCP server.** Three tools (`doctor`, `verbs`, `run`) that run any ppx verb in-process, so tokens and caches stay warm between calls.
-- **Skills** that tell the agent which verb to use for each task, starting with `pp-auth-doctor`.
+- **Skills** that tell the agent which verb to use for each task, starting with `pp-auth-doctor`, and two agents, `pp-architect` and `pp-reviewer`.
+- **A PBIR schema check.** After the agent writes or edits a Power BI report definition file (`*.Report/definition/**/*.json`), it is checked against Microsoft's schema and any errors go back to the agent. The check advises; it never blocks.
 
 ## Uninstall
 
