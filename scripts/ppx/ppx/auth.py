@@ -61,7 +61,7 @@ _CLAIMS = ("scp", "aud", "exp", "tid")
 
 _LOCK = threading.Lock()
 _MEMO: dict[tuple[str, str], "Token"] = {}
-_DISK_SEEN: dict[Path, tuple[tuple[int, int], dict]] = {}  # tokens.bin path -> (mtime, size) and its tokens
+_DISK_SEEN: dict[Path, tuple[bytes, dict]] = {}  # tokens.bin path -> its bytes and the tokens they hold
 
 
 @dataclass
@@ -306,7 +306,14 @@ def _best_error(key: str, op: str, failures: list[_Failure], data_dir: Path | No
 
 def _disk(data_dir: Path) -> list[dict]:
     try:
-        entries = json.loads(dpapi.unprotect((Path(data_dir) / MEMO_FILE).read_bytes()))
+        return _entries((Path(data_dir) / MEMO_FILE).read_bytes())
+    except OSError:
+        return []
+
+
+def _entries(blob: bytes) -> list[dict]:
+    try:
+        entries = json.loads(dpapi.unprotect(blob))
     except (OSError, ValueError):
         return []
     return [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
@@ -337,22 +344,22 @@ def _memo(data_dir: Path | None) -> dict[tuple[str, str], Token]:
         return _MEMO
     path = Path(data_dir) / MEMO_FILE
     try:
-        stat = path.stat()
+        blob = path.read_bytes()
     except OSError:
         return {}
-    # Decrypt only when the file changed: a paged walk asks for a token on every page.
-    stamp = (stat.st_mtime_ns, stat.st_size)
+    # Decrypt only when the bytes changed (a paged walk asks for a token on every page). DPAPI output
+    # differs on every write, so any rewrite by another process is seen, however fast or same-sized.
     seen = _DISK_SEEN.get(path)
-    if seen and seen[0] == stamp:
+    if seen and seen[0] == blob:
         return dict(seen[1])
     out = {}
-    for e in _disk(data_dir):
+    for e in _entries(blob):
         try:
             out[(str(e["resource"]), str(e["source"]))] = Token(str(e["value"]), str(e["source"]),
                                                                 float(e["expires_on"]))
         except (KeyError, TypeError, ValueError):
             continue
-    _DISK_SEEN[path] = (stamp, out)
+    _DISK_SEEN[path] = (blob, out)
     return dict(out)
 
 

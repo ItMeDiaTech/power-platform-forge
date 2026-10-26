@@ -37,15 +37,34 @@ class Response:
         return json.loads(self.body.decode("utf-8-sig"))
 
 
+def _origin(url: str) -> tuple:
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme, parts.hostname, parts.port
+
+
+class _SameOriginAuth(urllib.request.HTTPRedirectHandler):
+    """Carry the token through a redirect only when it stays on the same scheme, host and port."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        token = req.get_header("Authorization")
+        if new is not None and token and _origin(newurl) == _origin(req.full_url):
+            new.add_unredirected_header("Authorization", token)
+        return new
+
+
+_OPENER = urllib.request.build_opener(_SameOriginAuth)  # replaces the default redirect handler
+
+
 class Transport:
     def send(self, method: str, url: str, headers: dict, body: bytes | None, timeout: float) -> Response:
         req = urllib.request.Request(url, data=body, method=method,
                                      headers={k: v for k, v in headers.items() if k.lower() != "authorization"})
         if "Authorization" in headers:
-            # Unredirected: urllib copies ordinary headers to a redirect's target, even on another host.
+            # Unredirected: urllib would otherwise copy it to a redirect's target, even on another host.
             req.add_unredirected_header("Authorization", headers["Authorization"])
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with _OPENER.open(req, timeout=timeout) as resp:
                 return Response(resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read())
         except urllib.error.HTTPError as exc:
             return Response(exc.code, {k.lower(): v for k, v in (exc.headers or {}).items()}, exc.read() or b"")
@@ -75,8 +94,8 @@ def _short(url: str) -> str:
 def _same_host(link: str, base: str) -> str:
     """`link` made absolute against `base`, refused when it leaves base's scheme, host or port: the token goes with it."""
     absolute = urllib.parse.urljoin(base, link)
-    to, origin = urllib.parse.urlsplit(absolute), urllib.parse.urlsplit(base)
-    if (to.scheme, to.hostname, to.port) != (origin.scheme, origin.hostname, origin.port):
+    if _origin(absolute) != _origin(base):
+        to = urllib.parse.urlsplit(absolute)
         raise PpxError(f"{_short(base)} pointed to another host ({to.scheme}://{to.netloc}); "
                        "ppx does not send your token there")
     return absolute

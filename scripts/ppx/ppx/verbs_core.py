@@ -55,7 +55,7 @@ VERBS: tuple[Verb, ...] = (
     Verb(("probe",), "Discover what this user can reach on the tenant; writes routing.json and a scrubbed report",
          "local", "ppx.probe:run",
          notice="Probe what this user can reach and rewrite routing.json on this computer"
-                " (write probes use scratch workspace {workspace})",
+                " (write probes use scratch workspace {workspace} and take over model {model})",
          args=(a("--area", help=f"comma-separated areas to probe: {','.join(AREAS)} or all (default: all)"),
                a("--write", kind="flag", help="also run write probes against the scratch items given"),
                a("--workspace", help="scratch workspace (name or id) for write probes"),
